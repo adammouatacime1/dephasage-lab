@@ -1,0 +1,14 @@
+import { chromium } from '@playwright/test';
+import { mkdir } from 'node:fs/promises';
+const output = process.env.REVIEW_DIR || 'artifacts/visual-review';
+await mkdir(output, {recursive:true});
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || '/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+const page=await browser.newPage({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
+page.on('pageerror',e=>console.error('PAGE ERROR',e));
+await page.goto('http://localhost:5173/dephasage-lab/');
+await page.screenshot({path:`${output}/desktop.png`,fullPage:true});
+await page.setViewportSize({width:390,height:844});
+await page.reload();
+await page.screenshot({path:`${output}/mobile.png`,fullPage:true});
+console.log('overflow',await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth})));
+await browser.close();
