@@ -1,0 +1,68 @@
+.dephasage-lab .dp-apparatus,.dephasage-lab .dp-phase-circles{min-width:0;width:100%}
+.dephasage-lab .dp-scene-caption{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:17px 21px 3px;font-size:10px;color:var(--lk-muted)}
+.dephasage-lab .dp-channel{display:inline-flex;gap:6px;align-items:center;font-weight:600}
+.dephasage-lab .dp-channel::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor}
+.dephasage-lab .dp-channel-one{color:#218dba}
+.dephasage-lab .dp-channel-two{color:#d4515e}
+.dephasage-lab .dp-apparatus-svg,.dephasage-lab .dp-phase-circles>svg{width:100%;height:auto;display:block;min-width:0;user-select:none;touch-action:pan-y}
+.dephasage-lab .dp-apparatus-svg text,.dephasage-lab .dp-phase-circles text{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+.dephasage-lab .dp-diagram-label{font-size:12px;fill:var(--lk-muted)}
+.dephasage-lab .dp-small-label{font-size:10px;fill:var(--lk-muted)}
+.dephasage-lab .dp-device-name{font-size:12px;fill:var(--lk-text);font-weight:600}
+.dephasage-lab .dp-gbf{fill:var(--lk-panel-soft);stroke:var(--lk-muted);stroke-width:1.4}
+.dephasage-lab .dp-gbf-screen{fill:var(--lk-accent-soft);stroke:var(--lk-line)}
+.dephasage-lab .dp-gbf-wave{fill:none;stroke:var(--lk-accent);stroke-width:1.6}
+.dephasage-lab .dp-gbf-dial{fill:var(--lk-panel);stroke:var(--lk-muted);stroke-width:1.2}
+.dephasage-lab .dp-terminal{fill:var(--lk-muted)}
+.dephasage-lab .dp-electrical-wire{fill:none;stroke:var(--lk-muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dephasage-lab .dp-speaker{fill:var(--lk-panel-soft);stroke:var(--lk-text);stroke-width:1.5;stroke-linejoin:round}
+.dephasage-lab .dp-sound-arc{fill:none;stroke:var(--lk-accent);stroke-width:1.6;opacity:.7}
+.dephasage-lab .dp-propagation-arrow{stroke:var(--lk-muted);stroke-width:1.3;fill:none}
+.dephasage-lab .dp-arrow-head{fill:var(--lk-muted)}
+.dephasage-lab .dp-rail{stroke:var(--lk-line);stroke-width:3;fill:none;stroke-linecap:round}
+.dephasage-lab .dp-position-projection{fill:none;stroke:var(--lk-muted);stroke-width:1;stroke-dasharray:3 5;opacity:.55}
+.dephasage-lab .dp-microphone{color:var(--lk-text)}
+.dephasage-lab .dp-mic-body{fill:var(--lk-panel);stroke:currentColor;stroke-width:2}
+.dephasage-lab .dp-mic-grille{fill:none;stroke:currentColor;stroke-width:1.3;opacity:.8}
+.dephasage-lab .dp-mic-stand{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.dephasage-lab .dp-mic-label{font-size:15px;font-weight:700;fill:currentColor}
+.dephasage-lab .dp-voltage{font-size:11px;fill:currentColor;font-weight:500}
+.dephasage-lab .dp-mic-drag-label{font-size:18px}
+.dephasage-lab .dp-mic-hit{fill:transparent;stroke:transparent;stroke-width:1}
+.dephasage-lab .dp-movable{cursor:grab;touch-action:none}
+.dephasage-lab .dp-movable:active{cursor:grabbing}
+.dephasage-lab .dp-movable:focus{outline:none}
+.dephasage-lab .dp-movable:focus-visible .dp-mic-hit{fill:var(--lk-accent-soft);stroke:#45b3ce;stroke-width:2}
+.dephasage-lab .dp-movable[aria-disabled=true]{cursor:default}
+.dephasage-lab .dp-ruler{stroke:var(--lk-muted);stroke-width:1.3;fill:none}
+.dephasage-lab .dp-ruler-tick{stroke:var(--lk-muted);stroke-width:1;fill:none}
+.dephasage-lab .dp-ruler-label{font-size:12px;fill:var(--lk-muted)}
+.dephasage-lab .dp-distance-dimension{stroke:var(--lk-muted);stroke-width:1.2;fill:none}
+.dephasage-lab .dp-distance-label{fill:var(--lk-text);font-size:13px;font-weight:600}
+.dephasage-lab .dp-source-dimension{fill:none;stroke:var(--lk-muted);stroke-width:1;stroke-dasharray:2 3}
+.dephasage-lab .dp-scene-note{font-size:10px!important;line-height:1.7!important;color:var(--lk-muted);padding:4px 21px 14px;margin:0!important}
+.dephasage-lab .dp-scene-note strong{font-weight:600;color:var(--lk-text)}
+.dephasage-lab .dp-free-note{color:var(--lk-warning-text)}
+.dephasage-lab .dp-signal-readouts{display:flex;flex-wrap:wrap;gap:18px;padding:12px 21px;border-top:1px solid var(--lk-line);font-size:10px;font-variant-numeric:tabular-nums;color:var(--lk-muted);background:var(--lk-panel-soft)}
+.dephasage-lab .dp-mobile-distance{display:none}
+.dephasage-lab .dp-phase-circles>svg{padding:12px 12px 0}
+.dephasage-lab .dp-phase-circle{fill:none;stroke:var(--lk-line);stroke-width:1.8}
+.dephasage-lab .dp-phase-axis{fill:none;stroke:var(--lk-muted);stroke-width:1;opacity:.45}
+.dephasage-lab .dp-angle-label{font-size:12px;fill:var(--lk-muted)}
+.dephasage-lab .dp-rotation{fill:none;stroke:var(--lk-muted);stroke-width:1.2;opacity:.6}
+.dephasage-lab .dp-phase-ray{stroke-width:2.5;fill:none;stroke-linecap:round}
+.dephasage-lab .dp-phase-projection{stroke-dasharray:4 4;stroke-width:1.2;fill:none;opacity:.6}
+.dephasage-lab .dp-normalized-projection{stroke-width:4;fill:none;opacity:.25}
+.dephasage-lab .dp-phase-origin{fill:var(--lk-muted)}
+.dephasage-lab .dp-phase-point-label{font-size:15px;font-weight:650}
+.dephasage-lab .dp-phase-projection-label{font-size:13px;fill:var(--lk-muted)}
+.dephasage-lab .dp-phase-voltage-label{font-size:12px;fill:var(--lk-text)}
+.dephasage-lab .dp-circle-relation{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;color:var(--lk-muted);padding:12px 21px;border-top:1px solid var(--lk-line);background:var(--lk-panel-soft)}
+@media(max-width:850px){.dephasage-lab .dp-scene-caption{padding:14px 15px 0;gap:10px;font-size:9px}.dephasage-lab .dp-scene-note{padding:4px 15px 12px}.dephasage-lab .dp-signal-readouts{padding:11px 15px;gap:12px}.dephasage-lab .dp-phase-circles>svg{padding:13px 0 5px}}
+@media(max-width:600px){.dephasage-lab .dp-apparatus-svg{width:100%;min-height:210px}.dephasage-lab .dp-scene-caption{font-size:9px;line-height:1.6;padding:13px 14px 0;gap:8px 12px}.dephasage-lab .dp-scene-caption>span:last-child{flex-basis:100%}.dephasage-lab .dp-diagram-label{font-size:17px}.dephasage-lab .dp-device-name{font-size:17px}.dephasage-lab .dp-small-label{font-size:13px}.dephasage-lab .dp-mic-label{font-size:23px}.dephasage-lab .dp-voltage{font-size:17px}.dephasage-lab .dp-ruler-label{font-size:19px}.dephasage-lab .dp-distance-label{font-size:18px}.dephasage-lab .dp-mobile-distance{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:5px 10px;margin:0 14px 9px;padding:12px;border:1px solid var(--lk-line);border-radius:8px;font-size:10px;color:var(--lk-muted);background:var(--lk-panel-soft)}.dephasage-lab .dp-mobile-distance strong{font-size:13px;color:var(--lk-text);font-weight:600;font-variant-numeric:tabular-nums}.dephasage-lab .dp-mobile-distance small{flex-basis:100%;font-size:9px;line-height:1.6}.dephasage-lab .dp-scene-note{font-size:10px!important;padding:4px 14px 13px}.dephasage-lab .dp-signal-readouts{font-size:10px;padding:11px 14px;gap:12px}.dephasage-lab .dp-angle-label{font-size:17px}.dephasage-lab .dp-phase-point-label{font-size:20px}.dephasage-lab .dp-phase-projection-label{font-size:18px}.dephasage-lab .dp-phase-voltage-label{font-size:16px}.dephasage-lab .dp-circle-relation{padding:11px 14px;gap:8px 15px;font-size:10px}}
+
+@media(max-width:600px){.dephasage-lab .dp-mic-hit{x:-70px;width:140px}}
+
+.dephasage-lab .dp-apparatus-compact{display:none}
+@media(max-width:600px){.dephasage-lab .dp-apparatus-desktop{display:none}.dephasage-lab .dp-apparatus-compact{display:block;min-height:0}.dephasage-lab .dp-mic-hit{x:-40px;width:80px}.dephasage-lab .dp-apparatus-compact .dp-mic-label{font-size:21px}.dephasage-lab .dp-apparatus-compact .dp-voltage{font-size:16px}.dephasage-lab .dp-apparatus-compact .dp-device-name{font-size:16px}}
+@media(max-width:600px){.dephasage-lab .dp-mic-hit{x:-60px;width:100px}}
