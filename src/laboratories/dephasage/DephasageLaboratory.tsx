@@ -1,8 +1,8 @@
 import { useEffect, useId, useState } from 'react';
 import { Activity, ArrowRightLeft, BookOpen, FlaskConical, Radio, RotateCcw, SlidersHorizontal } from 'lucide-react';
-import { Badge, Button, Callout, LabLayout, LabRoot, MetricGrid, Panel, ParameterControl, PlaybackBar, SelectControl, SimulationCard, SimulationViewport, Tabs, Toggle, WorkspaceHeading } from '../../shared/lab-ui';
+import { Badge, Button, Callout, LabLayout, LabRoot, MetricGrid, Panel, ParameterControl, PlaybackBar, SegmentedControl, SelectControl, SimulationCard, SimulationViewport, Tabs, Toggle, WorkspaceHeading } from '../../shared/lab-ui';
 import type { LabTheme } from '../../shared/lab-ui';
-import { DEFAULT_PARAMETERS, derive, sample, formatNumber, radianLabel, type LabParameters } from '../../physics/model';
+import { DEFAULT_PARAMETERS, derive, sample, formatNumber, radianLabel, MEDIA, changeMedium, type Medium, type LabParameters } from '../../physics/model';
 import { useSimulationClock } from './useSimulationClock';
 import { Apparatus, PhaseCircles } from './Scenes';
 import { Oscilloscope } from './Oscilloscope';
@@ -26,6 +26,10 @@ export function DephasageLaboratory({active = true, theme = 'light'}: DephasageL
   const {time,setTime} = useSimulationClock(active,running,speed);
   const id = useId(); const m = derive(parameters), current = sample(parameters,time), physical = parameters.mode === 'microphones';
   const update = (patch: Partial<LabParameters>) => { setParameters(previous => ({...previous,...patch})); setTime(0); };
+  const selectMedium = (medium: string) => { setParameters(previous => changeMedium(previous,medium as Medium)); setTime(0); };
+  const water = parameters.medium === 'water';
+  const medium = MEDIA[parameters.medium];
+  const viewOptions = views.map(option => water && option.id === 'microphones' ? {...option,label:'Hydrophones'} : option);
   useEffect(() => {
     if (!active) return;
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -34,10 +38,10 @@ export function DephasageLaboratory({active = true, theme = 'light'}: DephasageL
   },[active]);
   const signedDegrees = m.phaseDifference * 180 / Math.PI;
   const geometry = [
-    {label:'Distance entre microphones',symbol:'Δx',value:format(parameters.distance*100,2),unit:'cm',hint:physical ? 'M1 fixe · M2 mobile de 0 à 200 cm' : 'Position conservée · sans effet en phase libre'},
+    {label:water ? 'Distance entre hydrophones' : 'Distance entre microphones',symbol:'Δx',value:format(parameters.distance*100,2),unit:'cm',hint:physical ? 'M1 fixe · M2 mobile de 0 à 200 cm' : 'Position conservée · sans effet en phase libre'},
     {label:'Longueur d’onde',symbol:'λ',value:format(m.wavelength*100,2),unit:'cm',hint:'λ = c/f'},
     {label:'Nombre de longueurs d’onde',value:format(parameters.distance/m.wavelength),hint:physical ? 'Δx/λ · distance physique conservée si f change' : 'Δx/λ · position conservée, sans effet sur δ'},
-    {label:'Fréquence du GBF',symbol:'f',value:format(parameters.frequency,0),unit:'Hz',hint:`c = ${format(parameters.soundSpeed)} m/s`},
+    {label:'Fréquence du GBF',symbol:'f',value:format(parameters.frequency,0),unit:'Hz',hint:`${medium.label} · c = ${format(parameters.soundSpeed)} m/s`},
   ];
   const timing = [
     {label:'Période',symbol:'T',value:format(m.period*1000,4),unit:'ms',hint:'T = 1/f'},
@@ -46,26 +50,27 @@ export function DephasageLaboratory({active = true, theme = 'light'}: DephasageL
     {label:'Différence de phase signée',symbol:'Δφ',value:piLabel(m.phaseDifference),unit:'rad',hint:`${format(signedDegrees,2)}° · Δφ = φ₂ − φ₁ = −δ`},
   ];
   const amplitudes = [
-    {label:'Amplitude de référence',symbol:'A₁',value:format(m.A1),unit:'V',hint:'Tension du microphone M1'},
+    {label:'Amplitude de référence',symbol:'A₁',value:format(m.A1),unit:'V',hint:water ? 'Tension de l’hydrophone M1' : 'Tension du microphone M1'},
     {label:'Amplitude reçue',symbol:'A₂',value:format(m.A2,6),unit:'V',hint:physical && parameters.attenuation ? 'Atténuation spatiale, constante dans le temps' : 'Modèle idéal : A₂ = A₁'},
     {label:'Amplitude restante',value:format(100*m.ratio,2),unit:'%',hint:'100 × A₂/A₁'},
     {label:'Perte d’amplitude',value:format(100*(1-m.ratio),2),unit:'%',hint:'100 × (1 − A₂/A₁)'},
   ];
   return <LabRoot theme={theme} className={`lk-app dephasage-lab${presentation ? ' dp-presentation' : ''}`} aria-label="Laboratoire de déphasage" data-active={active}>
     <WorkspaceHeading eyebrow="PHYSIQUE · 2ᵉ BAC SCIENCES MATHÉMATIQUES · MAROC" title="Le son, une question de phase." description="Déplacez un microphone. Comparez les signaux. Donnez du sens au déphasage.">
-      <Tabs id={id} label="Vues du laboratoire" options={views} value={view} onChange={setView}/>
+      <Tabs id={id} label="Vues du laboratoire" options={viewOptions} value={view} onChange={setView}/>
     </WorkspaceHeading>
     {!active && <div className="dp-inactive" role="status">Laboratoire suspendu : l’horloge est arrêtée. Réactivez-le depuis le bandeau du site.</div>}
     <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view}`}>
     <LabLayout sidebar={<>
       <Panel title="Paramètres de l’expérience" icon={<SlidersHorizontal size={15}/>} className="lk-parameters">
         <fieldset disabled={!active} className="dp-parameter-fields">
-          <SelectControl label="Modèle" value={parameters.mode} options={[{id:'microphones',label:'Microphones'},{id:'free',label:'Phase libre'}]} onChange={mode=>update({mode:mode as LabParameters['mode']})}/>
+          <SelectControl label="Modèle" value={parameters.mode} options={[{id:'microphones',label:water ? 'Hydrophones' : 'Microphones'},{id:'free',label:'Phase libre'}]} onChange={mode=>update({mode:mode as LabParameters['mode']})}/>
+          <SelectControl label="Milieu de propagation" value={parameters.medium} options={[{id:'air',label:'Air'},{id:'water',label:'Eau douce'}]} onChange={selectMedium}/>
           <ParameterControl label="Fréquence du GBF" symbol="f" unit="Hz" value={parameters.frequency} min={200} max={2000} step={10} onChange={frequency=>update({frequency})}/>
-          <ParameterControl label="Célérité du son" symbol="c" unit="m/s" value={parameters.soundSpeed} min={200} max={500} step={1} onChange={soundSpeed=>update({soundSpeed})}/>
+          <ParameterControl label="Célérité du son" symbol="c" unit="m/s" value={parameters.soundSpeed} min={200} max={2000} step={1} onChange={soundSpeed=>update({soundSpeed})}/>
           <ParameterControl label="Amplitude de référence" symbol="A₁" unit="V" value={parameters.amplitude} min={0.1} max={5} step={0.1} onChange={amplitude=>update({amplitude})}/>
           {physical ? <ParameterControl label="Position de M2" symbol="Δx" unit="cm" value={parameters.distance*100} min={0} max={200} step={0.1} onChange={centimeters=>update({distance:centimeters/100})} hint="Distance depuis M1, conservée lors d’un changement de fréquence."/> : <ParameterControl label="Retard de phase libre" symbol="δ" unit="°" value={parameters.freePhaseDegrees} min={0} max={2160} step={1} onChange={freePhaseDegrees=>update({freePhaseDegrees})}/>}
-          <div className="lk-derived"><div className="lk-derived-row"><span>Distance source → M1</span><b>x₀ = {format(parameters.sourceDistance*100)} cm</b></div><div className="lk-derived-row"><span>Phase initiale</span><b>φ₀ = 0 rad</b></div></div>
+          <div className="lk-derived"><div className="lk-derived-row"><span>Milieu choisi</span><b>{medium.label}</b></div><div className="lk-derived-row"><span>Célérité de référence</span><b>≈ {format(medium.soundSpeed,0)} m/s</b></div><div className="lk-derived-row"><span>Distance source → M1</span><b>x₀ = {format(parameters.sourceDistance*100)} cm</b></div><div className="lk-derived-row"><span>Phase initiale</span><b>φ₀ = 0 rad</b></div></div>
           <Button onClick={()=>{setParameters({...DEFAULT_PARAMETERS});setTime(0);setSpeed(1);}}><RotateCcw size={13}/>Paramètres initiaux</Button>
         </fieldset>
       </Panel>
@@ -76,18 +81,22 @@ export function DephasageLaboratory({active = true, theme = 'light'}: DephasageL
           return <button key={label} type="button" disabled={disabled} aria-pressed={chosen} title={!physical ? 'Disponible en mode microphones' : distance>2 ? `Hors course : ${format(distance*100,2)} cm dépasse 200 cm` : `Déplacer M2 à ${format(distance*100,2)} cm`} onClick={()=>update({distance:Math.min(2,distance)})}><span className="lk-experiment-number">{String(index+1).padStart(2,'0')}</span><span>Δx = {label}<small>{format(distance*100,2)} cm{distance>2 ? ' · hors course' : ''}</small></span><span aria-hidden="true">{chosen?'•':'›'}</span></button>;
         })}</div><p className="dp-preset-note">{physical ? 'Au-delà de 200 cm, la position est hors de la course de M2.' : 'Ces positions sont disponibles dans le mode Microphones.'}</p>
       </Panel>
-      <Panel title="Amplitude et distance" icon={<Radio size={15}/>}>
+      <Panel title="Amortissement dans le milieu" icon={<Radio size={15}/>}>
         <fieldset disabled={!active||!physical} className="dp-parameter-fields">
           <Toggle label="Divergence sphérique et absorption" checked={parameters.attenuation} onChange={attenuation=>update({attenuation})}/>
-          {parameters.attenuation&&<ParameterControl label="Absorption" symbol="α" unit="m⁻¹" value={parameters.absorption} min={0} max={3} step={0.05} onChange={absorption=>update({absorption})}/>}
+          {parameters.attenuation&&<ParameterControl label="Absorption illustrative" symbol="α" unit="m⁻¹" value={parameters.absorption} min={0} max={3} step={0.05} onChange={absorption=>update({absorption})}/>}
         </fieldset>
-        <p className="dp-small">{!physical ? 'Phase libre : deux tensions idéales d’amplitudes égales. La distance et l’atténuation ne commandent pas les signaux.' : parameters.attenuation ? 'Modèle illustratif en champ libre : l’amplitude baisse avec la distance, sans décroissance temporelle à position fixe.' : 'Modèle idéal sans atténuation : A₂ = A₁. Les deux microphones ont la même sensibilité.'}</p>
+        <p className="dp-small">{!physical ? 'Phase libre : deux tensions idéales d’amplitudes égales. La distance et l’atténuation ne commandent pas les signaux.' : parameters.attenuation ? `Dans ${water ? 'l’eau douce' : 'l’air'}, l’amplitude diminue avec la distance. À position fixe, elle reste constante dans le temps.` : 'Modèle idéal sans atténuation : A₂ = A₁. Les deux capteurs ont la même sensibilité.'}</p>
+        <p className="dp-small">La divergence répartit l’énergie dans l’espace ; l’absorption la dissipe dans le milieu. Leurs facteurs d’amplitude se multiplient.</p>
+        <p className="dp-small">α est un coefficient d’illustration réglable, pas une valeur mesurée du matériau. Les valeurs réelles dépendent notamment de la fréquence et de la température.</p>
+        {physical&&parameters.attenuation&&<div className="lk-derived"><div className="lk-derived-row"><span>Amplitude après divergence</span><b>{format(parameters.sourceDistance/(parameters.sourceDistance+parameters.distance)*100,2)} %</b></div><div className="lk-derived-row"><span>Amplitude après absorption</span><b>{format(Math.exp(-parameters.absorption*parameters.distance)*100,2)} %</b></div></div>}
       </Panel>
       <Callout icon={<BookOpen size={16}/>} title="Une seule convention."><p>δ ≥ 0 est le retard de phase. La différence signée vaut Δφ = −δ : M2 est en retard sur M1. Après un tour complet, les signaux peuvent être en phase malgré un retard non nul.</p></Callout>
     </>}>
-      {(view==='sync'||view==='microphones') && <SimulationCard eyebrow="01 / LE MONTAGE EXPÉRIMENTAL" title="Du GBF aux deux microphones" actions={<Badge>{physical ? 'Propagation vers +x' : 'Phase libre · montage indépendant'}</Badge>}>
+      {(view==='sync'||view==='microphones') && <SimulationCard eyebrow="01 / LE MONTAGE EXPÉRIMENTAL" title={water ? 'Du GBF aux deux hydrophones' : 'Du GBF aux deux microphones'} actions={<Badge>{physical ? `${medium.label} · propagation vers +x` : 'Phase libre · montage indépendant'}</Badge>} toolbar={<div className="dp-medium-toolbar"><fieldset disabled={!active}><SegmentedControl label="Milieu de l’expérience" options={[{id:'air',label:'Air'},{id:'water',label:'Eau douce'}]} value={parameters.medium} onChange={selectMedium}/></fieldset><span>c = {format(parameters.soundSpeed,0)} m/s · {physical&&parameters.attenuation ? 'amortissement activé' : 'modèle idéal'}</span></div>}>
         <SimulationViewport label="Montage expérimental avec règle graduée"><Apparatus parameters={parameters} time={time} onDistanceChange={distance=>update({distance})} disabled={!active||!physical}/></SimulationViewport>
-        <div className="dp-montage-controls"><ParameterControl label="Déplacer M2" unit="cm" value={parameters.distance*100} min={0} max={200} step={0.1} onChange={n=>update({distance:n/100})} disabled={!active||!physical}/><span className="dp-small">Glissez le microphone rouge, utilisez les flèches du clavier ou saisissez une position.</span></div>
+        <div className="dp-medium-note">Changer de milieu conserve Δx, rétablit la célérité et l’absorption proposées, puis active l’atténuation. Les célérités sont des valeurs usuelles approchées, réglables.</div>
+        <div className="dp-montage-controls"><ParameterControl label="Déplacer M2" unit="cm" value={parameters.distance*100} min={0} max={200} step={0.1} onChange={n=>update({distance:n/100})} disabled={!active||!physical}/><span className="dp-small">Glissez {water ? 'l’hydrophone' : 'le microphone'} rouge, utilisez les flèches du clavier ou saisissez une position.</span></div>
       </SimulationCard>}
       {!physical&&<div className="lk-warning">Mode mathématique « phase libre » : δ est réglé directement. Le montage et Δx sont conservés à titre de repères et ne déterminent pas le déphasage. Le décalage δ/ω n’est pas présenté comme un temps de propagation.</div>}
       <MetricGrid metrics={geometry}/>
@@ -107,7 +116,7 @@ export function DephasageLaboratory({active = true, theme = 'light'}: DephasageL
         <div className="dp-equations"><div><span className="lk-eyebrow">EXPRESSIONS GÉNÉRALES · TENSIONS EN VOLTS</span><p className="dp-math dp-channel1">y₁(t) = A₁ sin(2πft + φ₀)</p><p className="dp-math dp-channel2">y₂(t) = A₂ sin(2πft + φ₀ − δ)</p></div><div><span className="lk-eyebrow">APPLICATION NUMÉRIQUE · t EN SECONDES</span><p className="dp-math dp-channel1">y₁(t) = {format(m.A1)} sin({format(2*parameters.frequency,0)}πt) V</p><p className="dp-math dp-channel2">y₂(t) = {format(m.A2,6)} sin({format(2*parameters.frequency,0)}πt − {piLabel(m.delta)}) V</p></div></div>
         <div className="dp-equations-footer"><span>À l’instant commun : <b className="dp-channel1" data-testid="instant-y1">y₁ = {format(current.y1,4)} V</b> · <b className="dp-channel2" data-testid="instant-y2">y₂ = {format(current.y2,4)} V</b></span><span>Δφ équivalent modulo 2π : {format(m.equivalentPhase*180/Math.PI,2)}°</span></div>
       </Panel>
-      <details className="dp-theory"><summary><BookOpen size={16}/>Comprendre les mesures et les limites du modèle</summary><div className="dp-theory-grid"><article><h3>Le temps et l’espace</h3><p>T = 1/f et λ = c/f. La période est une durée ; la longueur d’onde est une distance. Ici, Δt = Δx/c et δ = 2π Δx/λ = 2πf Δt. Δφ = −δ.</p></article><article><h3>Un retard, plusieurs tours</h3><p>Deux sinusoïdes seules ne permettent de retrouver le retard qu’à un multiple entier de T près. À Δx = 3λ, le retard total est 3T, bien que les signaux soient en phase. Les totaux sont calculés à partir de la distance, sans confusion avec le modulo.</p></article><article><h3>La pression devient une tension</h3><p>Les microphones ont la même sensibilité. y₁ et y₂ sont des tensions de sortie proportionnelles à la pression acoustique, en volts. Les cercles normalisés représentent des phases ; ils ne sont pas des trajectoires de particules d’air ou de microphones.</p></article><article><h3>Une atténuation spatiale</h3><p>Modèle idéal : A₂ = A₁. Modèle illustratif : A₂/A₁ = x₀/(x₀ + Δx) × exp(−αΔx), avec x₀ = 0,20 m et α ≥ 0 en m⁻¹. À position fixe, l’amplitude reste constante au cours du temps.</p></article><article><h3>Hypothèses du modèle</h3><p>Son sinusoïdal établi dans un milieu homogène, non dispersif et sans réflexion. La divergence sphérique et l’absorption sont une approximation pédagogique du haut-parleur en champ libre, sans prise en compte de sa directivité ni de son champ proche.</p></article><article><h3>Le temps de l’expérience</h3><p>Le ralenti pédagogique change seulement la vitesse d’écoulement du temps physique. Il ne modifie ni f, ni T, ni λ. Un changement de paramètre remet t à zéro ; changer f ou c conserve Δx en mètres. L’onglet masqué, la désactivation et la fermeture arrêtent l’horloge.</p></article></div></details>
+      <details className="dp-theory"><summary><BookOpen size={16}/>Comprendre les mesures et les limites du modèle</summary><div className="dp-theory-grid"><article><h3>Le temps et l’espace</h3><p>T = 1/f et λ = c/f. La période est une durée ; la longueur d’onde est une distance. Ici, Δt = Δx/c et δ = 2π Δx/λ = 2πf Δt. Δφ = −δ.</p></article><article><h3>Un retard, plusieurs tours</h3><p>Deux sinusoïdes seules ne permettent de retrouver le retard qu’à un multiple entier de T près. À Δx = 3λ, le retard total est 3T, bien que les signaux soient en phase. Les totaux sont calculés à partir de la distance, sans confusion avec le modulo.</p></article><article><h3>La pression devient une tension</h3><p>Les deux capteurs ont la même sensibilité ; ce sont des hydrophones dans l’eau. y₁ et y₂ sont des tensions de sortie proportionnelles à la pression acoustique, en volts. Les cercles normalisés représentent des phases ; ils ne sont pas des trajectoires de particules d’air ou de microphones.</p></article><article><h3>Air et eau : deux célérités</h3><p>Valeurs de référence approchées : 340 m/s dans l’air, 1 480 m/s dans l’eau douce vers la température ambiante. À fréquence et distance fixes, l’eau donne une longueur d’onde plus grande et un retard plus court. Les α proposés (0,20 et 0,05 m⁻¹) sont illustratifs, pas des mesures de l’absorption réelle de ces milieux.</p></article><article><h3>Une atténuation spatiale</h3><p>Modèle idéal : A₂ = A₁. Modèle illustratif : A₂/A₁ = x₀/(x₀ + Δx) × exp(−αΔx), avec x₀ = 0,20 m et α ≥ 0 en m⁻¹. À position fixe, l’amplitude reste constante au cours du temps.</p></article><article><h3>Hypothèses du modèle</h3><p>Son sinusoïdal établi dans un seul milieu homogène, non dispersif et sans réflexion. Le changement de milieu ne simule pas une traversée d’interface air–eau ; l’émetteur et les capteurs sont adaptés au milieu choisi. La divergence sphérique et l’absorption sont une approximation pédagogique du haut-parleur en champ libre, sans prise en compte de sa directivité ni de son champ proche.</p></article><article><h3>Le temps de l’expérience</h3><p>Le ralenti pédagogique change seulement la vitesse d’écoulement du temps physique. Il ne modifie ni f, ni T, ni λ. Un changement de paramètre remet t à zéro ; changer f ou c conserve Δx en mètres. L’onglet masqué, la désactivation et la fermeture arrêtent l’horloge.</p></article></div></details>
       <div className="dp-lab-footer"><span>Réalisé par Adam — 2ᵉ Bac Sciences Mathématiques</span><Button onClick={()=>setPresentation(v=>!v)} disabled={!active}>{presentation ? 'Quitter la présentation' : 'Mode présentation'}</Button></div>
     </LabLayout></div>
   </LabRoot>;

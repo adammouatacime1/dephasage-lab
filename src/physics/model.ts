@@ -9,9 +9,35 @@ export const TAU = 2 * Math.PI;
 export const PHASE_TOLERANCE = 1e-6;
 
 export type LaboratoryMode = 'microphones' | 'free';
+export type Medium = 'air' | 'water';
+
+export interface MediumPreset {
+  label: string;
+  /** Valeur usuelle approchée, vers 20 °C ; peut ensuite être réglée. */
+  soundSpeed: number;
+  /** Valeur d'illustration réglable, et non une mesure du matériau. */
+  illustrativeAbsorption: number;
+  description: string;
+}
+
+export const MEDIA: Readonly<Record<Medium, Readonly<MediumPreset>>> = Object.freeze({
+  air: Object.freeze({
+    label: 'Air',
+    soundSpeed: 340,
+    illustrativeAbsorption: 0.2,
+    description: 'Célérité usuelle approchée dans l’air vers 20 °C. Le coefficient d’absorption proposé est une valeur d’illustration réglable, pas une mesure du matériau.',
+  }),
+  water: Object.freeze({
+    label: 'Eau douce',
+    soundSpeed: 1480,
+    illustrativeAbsorption: 0.05,
+    description: 'Célérité usuelle approchée dans l’eau douce vers 20 °C. Le coefficient d’absorption proposé est une valeur d’illustration réglable, pas une mesure du matériau.',
+  }),
+});
 export type PhaseStatus = 'En phase' | 'Opposition de phase' | 'Quadrature' | 'Déphasage quelconque';
 
 export interface LabParameters {
+  medium: Medium;
   mode: LaboratoryMode;
   frequency: number;
   soundSpeed: number;
@@ -25,14 +51,15 @@ export interface LabParameters {
 }
 
 export const DEFAULT_PARAMETERS: Readonly<LabParameters> = Object.freeze({
+  medium: 'air',
   mode: 'microphones',
   frequency: 1000,
-  soundSpeed: 340,
+  soundSpeed: MEDIA.air.soundSpeed,
   amplitude: 1,
   distance: 0.133,
   sourceDistance: 0.2,
-  absorption: 0.2,
-  attenuation: false,
+  absorption: MEDIA.air.illustrativeAbsorption,
+  attenuation: true,
   freePhaseDegrees: 90,
   initialPhase: 0,
 });
@@ -74,6 +101,7 @@ export interface SignalSample {
 
 /** Refuse les valeurs non physiques au lieu de propager NaN dans les vues. */
 export function validateParameters(p: LabParameters): void {
+  if (p.medium !== 'air' && p.medium !== 'water') throw new RangeError('Milieu de propagation invalide.');
   if (p.mode !== 'microphones' && p.mode !== 'free') throw new RangeError('Mode de laboratoire invalide.');
   const finite: (keyof LabParameters)[] = ['frequency', 'soundSpeed', 'amplitude', 'distance', 'sourceDistance', 'absorption', 'freePhaseDegrees', 'initialPhase'];
   for (const name of finite) {
@@ -87,6 +115,24 @@ export function validateParameters(p: LabParameters): void {
   if (p.absorption < 0) throw new RangeError('Le coefficient d’absorption doit être positif ou nul.');
   if (p.freePhaseDegrees < 0) throw new RangeError('Le retard de phase libre doit être positif ou nul.');
   if (typeof p.attenuation !== 'boolean') throw new RangeError('Le choix d’atténuation doit être booléen.');
+}
+
+/**
+ * Change le milieu sans déplacer les capteurs ni modifier le GBF.
+ * L'absorption est une présélection illustrative ; l'atténuation est spatiale.
+ */
+export function changeMedium(p: LabParameters, medium: Medium): LabParameters {
+  if (medium !== 'air' && medium !== 'water') throw new RangeError('Milieu de propagation invalide.');
+  const preset = MEDIA[medium];
+  const next: LabParameters = {
+    ...p,
+    medium,
+    soundSpeed: preset.soundSpeed,
+    absorption: preset.illustrativeAbsorption,
+    attenuation: true,
+  };
+  validateParameters(next);
+  return next;
 }
 
 export function positivePhase(angle: number): number {

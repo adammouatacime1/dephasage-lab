@@ -1,6 +1,6 @@
-import { useId, useRef } from 'react';
+import { useId, useMemo, useRef } from 'react';
 import type { KeyboardEvent, PointerEvent } from 'react';
-import { derive, formatNumber, sample, TAU, type LabParameters } from '../../physics/model';
+import { derive, formatNumber, sample, TAU, type LabParameters, MEDIA } from '../../physics/model';
 import './scenes.css';
 
 const BLUE = '#218dba';
@@ -18,6 +18,7 @@ export interface ApparatusProps {
 /** The rails separate the drawings, not the longitudinal coordinates of the model. */
 export function Apparatus({ parameters, time, onDistanceChange, disabled = false }: ApparatusProps) {
   const id = useId().replace(/:/g, '');
+  const water = parameters.medium === 'water';
   const first = sample(parameters, time);
   const model = derive(parameters);
   const currentPointer = useRef<number | null>(null);
@@ -59,7 +60,7 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
     className={`dp-microphone ${mobile ? 'dp-movable' : ''}`}
     transform={`translate(${x},${y})`}
     {...(mobile ? {
-      role: 'slider', tabIndex: disabled ? -1 : 0, 'aria-label': 'Position longitudinale du microphone M2',
+      role: 'slider', tabIndex: disabled ? -1 : 0, 'aria-label': water ? 'Position longitudinale de l’hydrophone M2' : 'Position longitudinale du microphone M2',
       'aria-valuemin': 0, 'aria-valuemax': 200, 'aria-valuenow': Number((parameters.distance * 100).toFixed(2)),
       'aria-valuetext': `${formatNumber(parameters.distance * 100, 2)} centimètres de M1`, 'aria-disabled': disabled,
       onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: up, onKeyDown: keyboard,
@@ -67,20 +68,21 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
     style={{ color }}
   >
     <rect className="dp-mic-hit" x="-25" y="-45" width="50" height="100" rx="12"/>
-    <path d="M-13-24H13V5Q13 18 0 18Q-13 18-13 5Z" className="dp-mic-body"/>
-    <path d="M-8-16H8M-8-11H8M-8-6H8M-8-1H8" className="dp-mic-grille"/>
+    <path d={water ? "M-12-21Q0-28 12-21V8Q12 20 0 20Q-12 20-12 8Z" : "M-13-24H13V5Q13 18 0 18Q-13 18-13 5Z"} className="dp-mic-body"/>
+    <path d={water ? "M-8-12H8M-8-3H8M-8 6H8" : "M-8-16H8M-8-11H8M-8-6H8M-8-1H8"} className="dp-mic-grille"/>
     <path d="M-20 0V5Q-20 25 0 25Q20 25 20 5V0M0 25V46M-20 46H20" className="dp-mic-stand"/>
     <circle cy="-25" r="3" fill={color}/>
     <text x={mobile ? (x > (compact ? 500 : 780) ? -29 : 29) : 0} y={mobile ? -6 : -54} className="dp-mic-label" textAnchor={mobile ? (x > (compact ? 500 : 780) ? 'end' : 'start') : 'middle'}>{label}{mobile && <tspan className="dp-mic-drag-label"> ↔</tspan>}</text>
     <text x={mobile ? (x > (compact ? 500 : 780) ? -29 : 29) : 0} y={mobile ? 14 : -35} className="dp-voltage" textAnchor={mobile ? (x > (compact ? 500 : 780) ? 'end' : 'start') : 'middle'}>{formatNumber(voltage, 3)} V</text>
   </g>;
 
-  return <div className="dp-apparatus">
-    <div className="dp-scene-caption"><span className="dp-channel dp-channel-one">CH1 / M1 · fixe</span><span className="dp-channel dp-channel-two">CH2 / M2 · mobile</span><span>Son établi · propagation vers +x</span></div>
-    <svg className="dp-apparatus-svg dp-apparatus-desktop" data-ruler-left={left} data-ruler-right={right} viewBox="0 0 900 340" role="group" aria-label={`Montage : GBF, haut-parleur et microphones. M1 est fixe ; M2 est à ${formatNumber(parameters.distance * 100, 2)} cm de M1.`}>
+  return <div className={`dp-apparatus${water ? ' dp-apparatus-water' : ''}`} data-medium={parameters.medium}>
+    <div className="dp-scene-caption"><span className="dp-channel dp-channel-one">CH1 / M1 · fixe</span><span className="dp-channel dp-channel-two">CH2 / M2 · mobile</span><span>{MEDIA[parameters.medium].label} · son établi · propagation vers +x</span></div>
+    <svg className="dp-apparatus-svg dp-apparatus-desktop" data-ruler-left={left} data-ruler-right={right} viewBox="0 0 900 340" role="group" aria-label={`Montage : GBF, ${water ? 'émetteur immergé et hydrophones' : 'haut-parleur et microphones'}. M1 est fixe ; M2 est à ${formatNumber(parameters.distance * 100, 2)} cm de M1.`}>
       <defs>
         <marker id={`${id}-dimension`} viewBox="0 0 10 10" markerWidth="5" markerHeight="5" refX="5" refY="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" className="dp-arrow-head"/></marker>
       </defs>
+      {water&&<g className="dp-water-region" aria-hidden="true"><rect x="162" y="51" width="723" height="191" rx="8"/><path d="M162 56q20-9 40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0t40 0"/><text x="865" y="78" textAnchor="end">Eau douce</text></g>}
       <path d="M180 34H384" className="dp-propagation-arrow" markerEnd={`url(#${id}-dimension)`}/>
       <text x="276" y="22" textAnchor="middle" className="dp-diagram-label">Propagation du son →</text>
       <g transform="translate(25,108)">
@@ -89,7 +91,7 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
         <path d="M18 28Q24 10 30 28T42 28T54 28T66 28" className="dp-gbf-wave"/>
         <circle cx="91" cy="27" r="8" className="dp-gbf-dial"/>
         <circle cx="91" cy="53" r="3" className="dp-terminal"/>
-        <text x="16" y="62" className="dp-device-name">GBF</text>
+        <text x="16" y="62" className="dp-device-name">GBF</text>{water&&<text x="55" y="-12" textAnchor="middle" className="dp-small-label">Hors de l’eau</text>}
         <text x="55" y="97" textAnchor="middle" className="dp-diagram-label">{formatNumber(parameters.frequency, 0)} Hz</text>
       </g>
       <path d="M116 161H151V176H170V142H184" className="dp-electrical-wire"/>
@@ -97,7 +99,7 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
       <g transform="translate(181,106)">
         <path d="M0 20H17L43 0V72L17 52H0Z" className="dp-speaker"/>
         <path d="M52 23Q65 36 52 49M66 11Q91 36 66 61" className="dp-sound-arc"/>
-        <text x="22" y="102" textAnchor="middle" className="dp-device-name">Haut-parleur</text>
+        <text x="22" y="102" textAnchor="middle" className="dp-device-name">{water ? 'Émetteur immergé' : 'Haut-parleur'}</text>
       </g>
       <path d={`M${left} 129H${right}M${left} 200H${right}`} className="dp-rail"/>
       <path d={`M${left} 55V${rulerY}M${x2} 145V${rulerY}`} className="dp-position-projection"/>
@@ -116,13 +118,14 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
     </svg>
     <svg className="dp-apparatus-svg dp-apparatus-compact" data-ruler-left="160" data-ruler-right="560" viewBox="0 0 600 405" role="group" aria-label={`Montage adapté au téléphone. M2 est à ${formatNumber(parameters.distance * 100, 2)} centimètres de M1.`}>
       <defs><marker id={`${id}-compact-dimension`} viewBox="0 0 10 10" markerWidth="5" markerHeight="5" refX="5" refY="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" className="dp-arrow-head"/></marker></defs>
+      {water&&<g className="dp-water-region" aria-hidden="true"><rect x="44" y="118" width="540" height="173" rx="8"/><path d="M44 123q15-8 30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0t30 0"/></g>}
       <g transform="translate(20,24)">
         <rect width="110" height="72" rx="9" className="dp-gbf"/>
         <rect x="12" y="12" width="61" height="32" rx="4" className="dp-gbf-screen"/>
         <path d="M18 28Q24 10 30 28T42 28T54 28T66 28" className="dp-gbf-wave"/>
         <circle cx="91" cy="27" r="8" className="dp-gbf-dial"/>
         <circle cx="91" cy="53" r="3" className="dp-terminal"/>
-        <text x="16" y="63" className="dp-device-name">GBF</text>
+        <text x="16" y="63" className="dp-device-name">GBF</text>{water&&<text x="55" y="-10" textAnchor="middle" className="dp-small-label">Hors de l’eau</text>}
       </g>
       <text x="150" y="43" className="dp-diagram-label">{formatNumber(parameters.frequency, 0)} Hz</text>
       <path d="M111 77H140V116H60V181H77" className="dp-electrical-wire"/>
@@ -130,7 +133,7 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
         <path d="M0 20H17L43 0V72L17 52H0Z" className="dp-speaker"/>
         <path d="M51 23Q64 36 51 49M65 11Q90 36 65 61" className="dp-sound-arc"/>
       </g>
-      <text x="77" y="242" textAnchor="middle" className="dp-device-name">Haut-parleur</text>
+      <text x="77" y="242" textAnchor="middle" className="dp-device-name">{water ? 'Émetteur immergé' : 'Haut-parleur'}</text>
       <path d="M280 52H518" className="dp-propagation-arrow" markerEnd={`url(#${id}-compact-dimension)`}/>
       <text x="400" y="37" textAnchor="middle" className="dp-diagram-label">Son vers +x</text>
       <path d="M160 173H560M160 247H560" className="dp-rail"/>
@@ -146,10 +149,35 @@ export function Apparatus({ parameters, time, onDistanceChange, disabled = false
       <text x="128" y="298" textAnchor="middle" className="dp-diagram-label">x₀</text>
     </svg>
     <div className="dp-mobile-distance"><span>Position de M2</span><strong>Δx = {formatNumber(parameters.distance * 100, 2)} cm</strong><small>Glissez M2, ou utilisez le curseur et la saisie ci-dessous.</small></div>
-    <p className="dp-scene-note">M1 est à x₀ = {formatNumber(parameters.sourceDistance * 100, 1)} cm du haut-parleur. Les deux rails distinguent les dessins ; le modèle utilise les positions longitudinales sur <strong>le même axe</strong>. M2 : flèches ±0,1 cm, Maj + flèche ±1 cm, Début / Fin.</p>
+    <p className="dp-scene-note">M1 est à x₀ = {formatNumber(parameters.sourceDistance * 100, 1)} cm de {water ? 'l’émetteur immergé' : 'l’émetteur acoustique'}. {water ? 'M1 et M2 sont des hydrophones adaptés à l’eau, avec une même sensibilité étalonnée. ' : ''}Les deux rails distinguent les dessins ; le modèle utilise les positions longitudinales sur <strong>le même axe</strong>. M2 : flèches ±0,1 cm, Maj + flèche ±1 cm, Début / Fin.</p>
     {parameters.mode === 'free' && <p className="dp-scene-note dp-free-note">Phase libre : ce montage n’impose pas le déphasage. La distance conservée est informative ; le retard affiché est mathématique.</p>}
+    {parameters.mode === 'microphones' && <AmplitudeEnvelope parameters={parameters}/>}
     <div className="dp-signal-readouts"><span className="dp-channel-one">y₁ = {formatNumber(first.y1, 3)} V</span><span className="dp-channel-two">y₂ = {formatNumber(first.y2, 3)} V</span><span>λ = {formatNumber(model.wavelength * 100, 2)} cm</span></div>
   </div>;
+}
+
+/** Profil spatial, indépendant du temps et de toute horloge d’animation. */
+function AmplitudeEnvelope({parameters}:{parameters:LabParameters}) {
+  const values = derive(parameters), left = 52, right = 574, top = 28, bottom = 139;
+  const X = (x:number) => left + x / 2 * (right-left);
+  const Y = (ratio:number) => bottom - ratio * (bottom-top);
+  const curve = useMemo(() => Array.from({length:121},(_,i)=>{
+    const d=i/60;
+    const ratio=parameters.attenuation ? parameters.sourceDistance/(parameters.sourceDistance+d)*Math.exp(-parameters.absorption*d) : 1;
+    return `${i===0?'M':'L'}${(52+d/2*522).toFixed(2)},${(139-ratio*111).toFixed(2)}`;
+  }).join(' '),[parameters]);
+  return <section className="dp-envelope" aria-label="Amortissement spatial de l’amplitude" data-testid="amplitude-envelope" data-ratio={values.ratio}>
+    <div className="dp-envelope-copy"><span className="lk-eyebrow">L’AMPLITUDE ET LA DISTANCE</span><h3>{parameters.attenuation?'Le son s’atténue en s’éloignant.':'Même amplitude à toute distance.'}</h3><p>M1 : 100 %<br/><span className="dp-channel-two">M2 : {formatNumber(100*values.ratio,2)} % restants</span></p><p>À position fixe, cette enveloppe reste constante dans le temps.</p></div>
+    <svg viewBox="0 0 620 195" role="img" aria-label={`Amplitude restante de 0 à 200 centimètres. Au capteur M2 : ${formatNumber(values.ratio*100,2)} pour cent.`}>
+      <text x={left} y="15" className="dp-envelope-unit">Amplitude restante (%)</text>
+      {[0,.5,1].map(r=><g key={r}><line x1={left} x2={right} y1={Y(r)} y2={Y(r)} className="dp-envelope-grid"/><text x={left-9} y={Y(r)+4} textAnchor="end" className="dp-envelope-label">{r*100}</text></g>)}
+      {[0,.5,1,1.5,2].map(x=><g key={x}><line x1={X(x)} x2={X(x)} y1={top} y2={bottom} className="dp-envelope-grid"/><text x={X(x)} y={bottom+22} textAnchor="middle" className="dp-envelope-label">{x*100}</text></g>)}
+      <path d={curve} className="dp-envelope-path"/>
+      <line x1={X(parameters.distance)} x2={X(parameters.distance)} y1={Y(values.ratio)} y2={bottom} className="dp-envelope-projection"/>
+      <circle cx={left} cy={top} r="6" fill={BLUE}/><circle cx={X(parameters.distance)} cy={Y(values.ratio)} r="4.5" fill={RED}/>
+      <text x={right} y="187" textAnchor="end" className="dp-envelope-unit">Distance depuis M1 (cm)</text>
+    </svg>
+  </section>;
 }
 
 export interface PhaseCirclesProps { parameters: LabParameters; time: number }
@@ -182,7 +210,7 @@ export function PhaseCircles({ parameters, time }: PhaseCirclesProps) {
         </g>;
       })}
     </svg>
-    <p className="dp-scene-note">Les deux cercles ont le même rayon normalisé. Leur projection <strong>verticale</strong> vaut sin θ ; la tension est yᵢ = Aᵢ sin θᵢ. Ils représentent des phases mathématiques, pas la trajectoire de l’air ni celle des microphones.</p>
+    <p className="dp-scene-note">Les deux cercles ont le même rayon normalisé. Leur projection <strong>verticale</strong> vaut sin θ ; la tension est yᵢ = Aᵢ sin θᵢ. Ils représentent des phases mathématiques, pas la trajectoire du fluide ni celle des capteurs.</p>
     <div className="dp-circle-relation"><span>θ₂ = θ₁ − δ</span><span>Δφ = −δ = {formatNumber(m.phaseDifference * 180 / Math.PI, 2)}°</span><span>Même vitesse angulaire ω</span></div>
   </div>;
 }

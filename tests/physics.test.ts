@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_PARAMETERS, TAU, PHASE_TOLERANCE, derive, sample, createSignalSampler, positivePhase, signedPhase, phaseStatus, validateParameters, radianLabel, formatNumber, type LabParameters } from '../src/physics/model.ts';
+import { DEFAULT_PARAMETERS, MEDIA, changeMedium, TAU, PHASE_TOLERANCE, derive, sample, createSignalSampler, positivePhase, signedPhase, phaseStatus, validateParameters, radianLabel, formatNumber, type LabParameters } from '../src/physics/model.ts';
 
 const parameters = (overrides: Partial<LabParameters> = {}): LabParameters => ({ ...DEFAULT_PARAMETERS, ...overrides });
 const near = (actual: number, expected: number, tolerance = 1e-10) => assert.ok(Math.abs(actual - expected) <= tolerance * Math.max(1, Math.abs(expected)), `${actual} ≈ ${expected}`);
@@ -10,6 +10,8 @@ test('conditions initiales : 1 000 Hz, 13,3 cm et longueur d’onde de 34 cm', (
   near(m.wavelength, .34); near(m.period * 1000, 1); near(m.delay * 1000, .133 / 340 * 1000);
   near(m.delta, TAU * .133 / .34); near(m.phaseDifference, -m.delta);
   near(m.deltaDegrees, 360 * .133 / .34); assert.equal(m.status, 'Déphasage quelconque');
+  assert.equal(DEFAULT_PARAMETERS.medium,'air'); assert.equal(DEFAULT_PARAMETERS.attenuation,true);
+  assert.ok(m.A2>0 && m.A2<m.A1);
 });
 
 test('Δx = 0 : retard nul et tensions identiques, avec ou sans atténuation', () => {
@@ -21,7 +23,7 @@ test('Δx = 0 : retard nul et tensions identiques, avec ou sans atténuation', (
 });
 
 for (const ratio of [.25,.5,.75,1,1.5,2,3]) test(`Δx = ${ratio} λ : retard total et statut de phase`, () => {
-  const base = parameters(), p = parameters({distance: ratio * derive(base).wavelength}), m = derive(p);
+  const base = parameters(), p = parameters({distance: ratio * derive(base).wavelength,attenuation:false}), m = derive(p);
   near(m.delay,ratio * m.period); near(m.delta,ratio * TAU); near(m.phaseDifference,-ratio * TAU);
   const expected = ratio % 1 === 0 ? 'En phase' : ratio % .5 === 0 ? 'Opposition de phase' : 'Quadrature';
   assert.equal(m.status,expected);
@@ -135,4 +137,62 @@ for(const frequency of [200,2000])test(`extrémités physiques à ${frequency} H
   const p=parameters({frequency,distance:2,attenuation:true,absorption:4}),m=derive(p),s=sample(p,.12345);
   assert.ok(Object.values(m).filter(v=>typeof v==='number').every(Number.isFinite));
   assert.ok(m.ratio>=0&&m.ratio<=1);near(s.y2,m.ratio*sample(p,.12345-m.delay).y1,1e-8);
+});
+
+test('eau douce : à 1 000 Hz, 148 cm donnent une longueur d’onde et un retard d’une période', () => {
+  const p=changeMedium(parameters({distance:1.48}), 'water'), m=derive(p);
+  near(m.wavelength,1.48); near(m.period,.001); near(m.delay,.001); near(m.delta,TAU);
+  assert.equal(m.status,'En phase'); near(m.equivalentDelta,0); near(m.equivalentPhase,0);
+  // Le rapport d’amplitude reste spatial ; être en phase ne signifie pas avoir la même amplitude.
+  for(const t of [.00017,.00025,.00103]) near(sample(p,t).y2,m.ratio*sample(p,t).y1);
+});
+
+test('changer air → eau réduit le retard et le déphasage à fréquence et position fixes', () => {
+  const air=parameters({distance:1.48}), water=changeMedium(air,'water');
+  const a=derive(air), w=derive(water);
+  assert.ok(w.wavelength>a.wavelength); assert.ok(w.delay<a.delay); assert.ok(w.delta<a.delta);
+  near(a.delay,1.48/340); near(w.delay,1.48/1480);
+  assert.equal(w.status,'En phase'); assert.equal(a.status,'Déphasage quelconque');
+  near(w.period,a.period);
+});
+
+test('changer de milieu conserve la position des capteurs, la fréquence et les réglages indépendants', () => {
+  const p=parameters({frequency:1400,distance:.913,amplitude:2.5,sourceDistance:.3,initialPhase:.7,freePhaseDegrees:450,attenuation:false});
+  const before={...p}, water=changeMedium(p,'water');
+  assert.deepEqual(p,before); assert.notEqual(water,p);
+  for(const key of ['frequency','distance','amplitude','sourceDistance','initialPhase','freePhaseDegrees','mode'] as const) assert.equal(water[key],p[key]);
+  assert.equal(water.medium,'water'); assert.equal(water.attenuation,true);
+  const restored=changeMedium({...water,soundSpeed:1520,absorption:1.2,attenuation:false},'air');
+  near(restored.soundSpeed,340); near(restored.absorption,.2); assert.equal(restored.attenuation,true);
+  near(restored.distance,p.distance); near(restored.frequency,p.frequency);
+});
+
+test('les deux milieux produisent une atténuation spatiale sans extinction temporelle du signal continu', () => {
+  for(const medium of ['air','water'] as const) {
+    const p=changeMedium(parameters({distance:1,amplitude:2}),medium), m=derive(p);
+    near(m.ratio,.2/1.2*Math.exp(-p.absorption)); assert.ok(m.A2<m.A1);
+    const peak=m.delay+Math.PI/(2*m.omega);
+    near(sample(p,peak).y2,m.A2); near(sample(p,peak+5000*m.period).y2,m.A2,1e-8);
+    near(derive({...p,attenuation:false}).A2,m.A1);
+  }
+});
+
+test('les coefficients proposés sont explicitement illustratifs, non des mesures des matériaux', () => {
+  for(const preset of Object.values(MEDIA)) {
+    assert.match(preset.description,/illustration réglable/);
+    assert.match(preset.description,/pas une mesure/);
+    assert.ok(preset.illustrativeAbsorption>=0);
+  }
+});
+
+test('phase libre : changer le milieu conserve le déphasage mathématique et les amplitudes égales', () => {
+  const p=parameters({mode:'free',freePhaseDegrees:450,distance:.87}), a=derive(p), water=changeMedium(p,'water'), w=derive(water);
+  near(w.delta,a.delta); near(w.delay,a.delay); near(w.A1,w.A2); near(w.ratio,1);
+  near(water.distance,p.distance); near(water.freePhaseDegrees,450); assert.equal(w.isPhysicalDelay,false);
+});
+
+test('un milieu absent ou inconnu est refusé', () => {
+  assert.throws(()=>derive({...parameters(),medium:'oil'} as unknown as LabParameters),RangeError);
+  assert.throws(()=>derive({...parameters(),medium:undefined} as unknown as LabParameters),RangeError);
+  assert.throws(()=>changeMedium(parameters(),'oil' as 'air'),RangeError);
 });

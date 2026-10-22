@@ -5,12 +5,19 @@ const preset = (page: Page, label: string) => page.locator('.dp-presets > button
 const metric = (page: Page, label: string) => page.locator('.lk-metric').filter({ has: page.getByText(label, { exact: true }) });
 const metricValue = (page: Page, label: string) => metric(page, label).locator('.lk-metric-value');
 const input = (page: Page, label: string) => page.getByRole('spinbutton', { name: label, exact: true });
+const mediumButtons = (page: Page) => page.getByRole('group', { name: 'Milieu de l’expérience', exact: true });
+async function displayedNumber(page: Page, label: string): Promise<number> {
+  const text = (await metricValue(page, label).textContent())!.replace(/\s/g, '');
+  const number = text.match(/[−-]?\d+(?:[,.]\d+)?/);
+  if (!number) throw new Error(`Valeur numérique absente de ${label} : ${text}`);
+  return Number(number[0].replace('−', '-').replace(',', '.'));
+}
 async function setNumber(page: Page, label: string, value: string) {
   await input(page, label).fill(value);
   await input(page, label).press('Enter');
 }
-async function dragMicrophone(page: Page, centimeters: number) {
-  const microphone = page.getByRole('slider', { name: 'Position longitudinale du microphone M2', exact: true });
+async function dragMicrophone(page: Page, centimeters: number, water = false) {
+  const microphone = page.getByRole('slider', { name: water ? 'Position longitudinale de l’hydrophone M2' : 'Position longitudinale du microphone M2', exact: true });
   await microphone.scrollIntoViewIfNeeded();
   const target = await microphone.evaluate((element, position) => {
     const svg = (element as SVGElement).ownerSVGElement!;
@@ -87,7 +94,7 @@ test('doubler f conserve la position, double δ et divise λ par deux', async ({
 test('atténuation spatiale : distance, amplitude reçue et désactivation', async ({ page }) => {
   await page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' }).check();
   await setNumber(page, 'Position de M2', '20');
-  await setNumber(page, 'Absorption', '0');
+  await setNumber(page, 'Absorption illustrative', '0');
   await expect(metricValue(page, 'Amplitude de référence')).toContainText('1');
   await expect(metricValue(page, 'Amplitude reçue')).toContainText('0,5');
   await expect(metricValue(page, 'Amplitude restante')).toContainText('50');
@@ -148,6 +155,8 @@ test('phase libre indépendante de la position conservée, sans atténuation aco
 });
 
 test('pas T/24 : phases, projection verticale et tension oscilloscope restent synchronisés', async ({ page }) => {
+  // Comparer ici les phases avec des amplitudes explicitement égales.
+  await page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' }).uncheck();
   await preset(page, 'λ/4').click();
   await page.getByRole('button', { name: 'Avancer d’un pas' }).click();
   await expect(page.getByTestId('physical-time')).toHaveText('t = 0,04167 ms');
@@ -321,4 +330,188 @@ test('interrompre un glissement temporel par active=false libère la fenêtre d�
   await expect(page.locator('.dp-time-cursor')).toHaveCount(1);
   await expect(page.getByText(/L’instant commun est hors de cette courte fenêtre/)).toHaveCount(0);
   await page.mouse.up();
+});
+
+test('l’air démarre avec un amortissement spatial activé et calculé en volts', async ({ page }) => {
+  await expect(page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' })).toBeChecked();
+  await expect(page.getByRole('combobox', { name: 'Milieu de propagation', exact: true })).toHaveValue('air');
+  const initialRatio = .2 / (.2 + .133) * Math.exp(-.2 * .133);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(initialRatio, 6);
+  expect(await displayedNumber(page, 'Amplitude restante')).toBeCloseTo(100 * initialRatio, 2);
+  expect(await displayedNumber(page, 'Perte d’amplitude')).toBeCloseTo(100 * (1 - initialRatio), 2);
+  await setNumber(page, 'Position de M2', '100');
+  const distantRatio = .2 / 1.2 * Math.exp(-.2);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(distantRatio, 6);
+  expect(distantRatio).toBeLessThan(initialRatio);
+  await setNumber(page, 'Absorption illustrative', '1');
+  const absorbedRatio = .2 / 1.2 * Math.exp(-1);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(absorbedRatio, 6);
+  expect(await displayedNumber(page, 'Perte d’amplitude')).toBeCloseTo(100 * (1 - absorbedRatio), 2);
+  await page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' }).uncheck();
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBe(1);
+  expect(await displayedNumber(page, 'Amplitude restante')).toBe(100);
+  expect(await displayedNumber(page, 'Perte d’amplitude')).toBe(0);
+});
+
+test('Eau douce : le sélecteur du montage recalcule célérité, phase, retard et absorption sans déplacer M2', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Milieu de propagation', exact: true })).toHaveValue('water');
+  await expect(mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(input(page, 'Célérité du son')).toHaveValue('1480');
+  await expect(input(page, 'Absorption illustrative')).toHaveValue('0.05');
+  await expect(input(page, 'Fréquence du GBF')).toHaveValue('1000');
+  await expect(input(page, 'Position de M2')).toHaveValue('13.3');
+  expect(await displayedNumber(page, 'Distance entre hydrophones')).toBe(13.3);
+  expect(await displayedNumber(page, 'Longueur d’onde')).toBe(148);
+  expect(await displayedNumber(page, 'Période')).toBe(1);
+  expect(await displayedNumber(page, 'Retard total calculé')).toBeCloseTo(.133 / 1480 * 1000, 4);
+  const phase = 2 * Math.PI * .133 / 1.48;
+  expect(await displayedNumber(page, 'Retard de phase total')).toBeCloseTo(phase, 3);
+  expect(await displayedNumber(page, 'Différence de phase signée')).toBeCloseTo(-phase, 3);
+  const ratio = .2 / .333 * Math.exp(-.05 * .133);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(ratio, 6);
+  const scope = page.getByTestId('oscilloscope');
+  expect(Number(await scope.getAttribute('data-sample-y1'))).toBeCloseTo(0, 10);
+  expect(Number(await scope.getAttribute('data-sample-y2'))).toBeCloseTo(-ratio * Math.sin(phase), 10);
+  await expect(page.getByRole('heading', { name: 'Du GBF aux deux hydrophones', exact: true })).toBeVisible();
+  await expect(page.locator('.dp-apparatus svg:visible').getByText('Émetteur immergé', { exact: true })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true })).toBeVisible();
+});
+
+test('le retour à Air rétablit ses valeurs proposées et t=0 en conservant fréquence et distance', async ({ page }) => {
+  await page.getByRole('combobox', { name: 'Milieu de propagation', exact: true }).selectOption('water');
+  await setNumber(page, 'Fréquence du GBF', '1200');
+  await setNumber(page, 'Position de M2', '40');
+  await setNumber(page, 'Célérité du son', '1300');
+  await setNumber(page, 'Absorption illustrative', '0,5');
+  await page.getByRole('button', { name: 'Avancer d’un pas' }).click();
+  await expect(page.getByTestId('physical-time')).not.toHaveText('t = 0 ms');
+  await mediumButtons(page).getByRole('button', { name: 'Air', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Milieu de propagation', exact: true })).toHaveValue('air');
+  await expect(input(page, 'Célérité du son')).toHaveValue('340');
+  await expect(input(page, 'Absorption illustrative')).toHaveValue('0.2');
+  await expect(input(page, 'Fréquence du GBF')).toHaveValue('1200');
+  await expect(input(page, 'Position de M2')).toHaveValue('40');
+  await expect(page.getByTestId('physical-time')).toHaveText('t = 0 ms');
+  expect(await displayedNumber(page, 'Longueur d’onde')).toBeCloseTo(340 / 1200 * 100, 2);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(.2 / .6 * Math.exp(-.2 * .4), 6);
+});
+
+test('dans l’eau, une longueur d’onde vaut 148 cm avec retard T ; 2λ et 3λ sont hors course', async ({ page }) => {
+  await page.getByRole('combobox', { name: 'Milieu de propagation', exact: true }).selectOption('water');
+  await preset(page, 'λ').click();
+  await expect(input(page, 'Position de M2')).toHaveValue('148');
+  await expect(page.locator('.lk-badge').filter({ hasText: /^En phase$/ })).toBeVisible();
+  expect(await displayedNumber(page, 'Retard total calculé')).toBe(1);
+  await expect(metric(page, 'Retard total calculé')).toContainText('1 T');
+  await expect(metricValue(page, 'Retard de phase total')).toContainText('2π');
+  await expect(page.locator('.dp-phase-summary')).toContainText('δ équivalent = 0 rad');
+  await expect(preset(page, '2λ')).toBeDisabled();
+  await expect(preset(page, '2λ')).toHaveAttribute('title', 'Hors course : 296 cm dépasse 200 cm');
+  await expect(preset(page, '3λ')).toBeDisabled();
+  await expect(preset(page, '3λ')).toHaveAttribute('title', 'Hors course : 444 cm dépasse 200 cm');
+  await page.getByRole('slider', { name: 'Curseur temporel commun', exact: true }).fill('0.25');
+  const ratio = .2 / 1.68 * Math.exp(-.05 * 1.48);
+  const scope = page.getByTestId('oscilloscope');
+  expect(Number(await scope.getAttribute('data-sample-y1'))).toBeCloseTo(1, 10);
+  expect(Number(await scope.getAttribute('data-sample-y2'))).toBeCloseTo(ratio, 10);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(ratio, 6);
+});
+
+test('l’hydrophone M2 se déplace au clavier et par glissement avec les mêmes unités', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  const hydrophone = page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true });
+  await hydrophone.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(input(page, 'Position de M2')).toHaveValue('13.4');
+  await page.keyboard.press('Shift+ArrowRight');
+  await expect(input(page, 'Position de M2')).toHaveValue('14.4');
+  await dragMicrophone(page, 100, true);
+  expect(Number(await input(page, 'Position de M2').inputValue())).toBeCloseTo(100, 1);
+  expect(Number(await input(page, 'Déplacer M2').inputValue())).toBeCloseTo(100, 1);
+  expect(await displayedNumber(page, 'Retard total calculé')).toBeCloseTo(1000 / 1480, 4);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(.2 / 1.2 * Math.exp(-.05), 6);
+});
+
+test('l’amortissement dans l’eau reste spatial pendant une période complète et les vues restent synchronisées', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  await preset(page, 'λ/4').click();
+  await expect(input(page, 'Position de M2')).toHaveValue('37');
+  const ratio = .2 / .57 * Math.exp(-.05 * .37);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(ratio, 6);
+  const amplitudeBefore = await metricValue(page, 'Amplitude reçue').textContent();
+  const scope = page.getByTestId('oscilloscope');
+  expect(Number(await scope.getAttribute('data-sample-y2'))).toBeCloseTo(-ratio, 10);
+  const step = page.getByRole('button', { name: 'Avancer d’un pas' });
+  for (let index = 0; index < 24; index++) await step.click();
+  await expect(page.getByTestId('physical-time')).toHaveText('t = 1 ms');
+  await expect(metricValue(page, 'Amplitude reçue')).toHaveText(amplitudeBefore!);
+  expect(Number(await scope.getAttribute('data-sample-y1'))).toBeCloseTo(0, 10);
+  expect(Number(await scope.getAttribute('data-sample-y2'))).toBeCloseTo(-ratio, 10);
+  await expect(page.locator('.dp-phase-circles')).toContainText('sin θ2 = -1');
+  const formattedRatio = ratio.toLocaleString('fr-FR', { maximumFractionDigits: 4 });
+  await expect(page.getByTestId('instant-y2')).toHaveText(`y₂ = -${formattedRatio} V`);
+});
+
+test('phase libre : changer Air/Eau conserve δ et n’impose aucune atténuation aux signaux', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  await setNumber(page, 'Position de M2', '47');
+  await page.getByRole('combobox', { name: 'Modèle', exact: true }).selectOption('free');
+  await setNumber(page, 'Retard de phase libre', '270');
+  await expect(metricValue(page, 'Retard de phase total')).toContainText('3π/2');
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBe(1);
+  expect(await displayedNumber(page, 'Amplitude restante')).toBe(100);
+  expect(await displayedNumber(page, 'Décalage temporel mathématique')).toBe(.75);
+  await expect(page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' })).toBeDisabled();
+  await mediumButtons(page).getByRole('button', { name: 'Air', exact: true }).click();
+  await expect(metricValue(page, 'Retard de phase total')).toContainText('3π/2');
+  expect(await displayedNumber(page, 'Décalage temporel mathématique')).toBe(.75);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBe(1);
+  expect(await displayedNumber(page, 'Distance entre microphones')).toBe(47);
+  await expect(input(page, 'Célérité du son')).toHaveValue('340');
+});
+
+for (const width of [320, 390]) test(`Eau douce sur mobile ${width}px : sélecteurs, position et thèmes sans débordement`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  const selector = page.getByRole('combobox', { name: 'Milieu de propagation', exact: true });
+  await expect(selector).toBeVisible();
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  await expect(selector).toHaveValue('water');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true })).toBeVisible();
+  await setNumber(page, 'Déplacer M2', '54,2');
+  await expect(input(page, 'Position de M2')).toHaveValue('54.2');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Activer le thème sombre' }).click();
+  await expect(page.locator('.dephasage-lab')).toHaveAttribute('data-lab-theme', 'dark');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Activer le thème clair' }).click();
+  await expect(page.locator('.dephasage-lab')).toHaveAttribute('data-lab-theme', 'light');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('le profil spatial montre le bon rapport d’amplitude, suit M2 et devient horizontal sans atténuation', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau douce', exact: true }).click();
+  const envelope = page.getByTestId('amplitude-envelope');
+  await expect(envelope).toBeVisible();
+  const initialCurve = await envelope.locator('.dp-envelope-path').getAttribute('d');
+  const initialPosition = await envelope.locator('circle').last().getAttribute('cx');
+  await setNumber(page, 'Position de M2', '100');
+  const ratio = .2 / 1.2 * Math.exp(-.05);
+  expect(Number(await envelope.getAttribute('data-ratio'))).toBeCloseTo(ratio, 12);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBeCloseTo(ratio, 6);
+  await expect(envelope.locator('circle').last()).not.toHaveAttribute('cx', initialPosition!);
+  // Une position différente déplace le point sur la même loi spatiale ;
+  // seul un changement de loi doit modifier toute l’enveloppe.
+  await expect(envelope.locator('.dp-envelope-path')).toHaveAttribute('d', initialCurve!);
+  await setNumber(page, 'Absorption illustrative', '1');
+  await expect(envelope.locator('.dp-envelope-path')).not.toHaveAttribute('d', initialCurve!);
+  expect(Number(await envelope.getAttribute('data-ratio'))).toBeCloseTo(.2 / 1.2 * Math.exp(-1), 12);
+  await page.getByRole('checkbox', { name: 'Divergence sphérique et absorption' }).uncheck();
+  expect(Number(await envelope.getAttribute('data-ratio'))).toBe(1);
+  const flatCurve = (await envelope.locator('.dp-envelope-path').getAttribute('d'))!;
+  const yCoordinates = [...flatCurve.matchAll(/[ML][\d.]+,([\d.]+)/g)].map(match => Number(match[1]));
+  expect(yCoordinates.length).toBeGreaterThan(50);
+  expect(new Set(yCoordinates).size).toBe(1);
+  await page.getByRole('combobox', { name: 'Modèle', exact: true }).selectOption('free');
+  await expect(envelope).toHaveCount(0);
 });
