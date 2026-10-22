@@ -14,15 +14,29 @@ export interface OscilloscopeProps {
 }
 
 const BASES = [0.05, 0.1, 0.2, 0.5, 1, 2, 5];
-const SENSITIVITIES = [0.1, 0.2, 0.5, 1, 2];
-const number = (value: number, digits = 3) => (Math.abs(value) < 1e-12 ? 0 : value).toLocaleString('fr-FR', { maximumFractionDigits: digits });
+const SENSITIVITIES = [0.00001, 0.00002, 0.00005, 0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5];
+const number = (value: number, digits = 3) => {
+  const precision = value !== 0 && Math.abs(value) < 0.001 ? Math.max(8, digits) : digits;
+  const clean = Math.abs(value) < .5 * 10 ** -precision ? 0 : value;
+  return clean.toLocaleString('fr-FR', { maximumFractionDigits: precision });
+};
+const nextReadableSensitivity = (required: number) => {
+  if (required <= 0) return SENSITIVITIES[0];
+  const ordinary = SENSITIVITIES.find(candidate => candidate >= required);
+  if (required >= SENSITIVITIES[0] && ordinary !== undefined) return ordinary;
+  // A very small transmitted signal can require a range below the preset list.
+  // This remains one shared V/div setting, never a gain applied to one trace.
+  const decade = 10 ** Math.floor(Math.log10(required));
+  const factor = [1, 2, 5, 10].find(candidate => candidate * decade >= required) ?? 10;
+  return Number((factor * decade).toPrecision(8));
+};
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /** The stabilized acquisition is anchored to a rising CH1 zero, not to another clock. */
 export function scopeWindow(parameters: LabParameters, time: number, millisecondsPerDivision: number, stabilized: boolean) {
-  const { period, omega } = derive(parameters);
+  const { period, omega, phase1 } = derive(parameters);
   const duration = millisecondsPerDivision * 10 / 1000;
-  const risingZero = -parameters.initialPhase / omega;
+  const risingZero = -phase1 / omega;
   const start = stabilized
     ? risingZero + Math.floor((time - risingZero) / period + 1e-10) * period
     : Math.floor(time / duration) * duration;
@@ -35,6 +49,8 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
   const [stabilized, setStabilized] = useState(true);
   const [show1, setShow1] = useState(true);
   const [show2, setShow2] = useState(true);
+  const [inspectedChannel, setInspectedChannel] = useState<1 | 2 | null>(null);
+  const comparisonSensitivity = useRef(0.5);
   const [cursor1, setCursor1] = useState(0.2);
   const [cursor2, setCursor2] = useState(0.7);
   const [width, setWidth] = useState(900);
@@ -57,8 +73,23 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
   const value = sample(parameters, time);
   const timeVisible = time >= win.start - 1e-10 && time <= win.start + win.duration + 1e-10;
   const cursorX = timeVisible ? X(time) : left;
-  const delayOutside = m.delay > win.duration + 1e-12;
+  const delayOutside = Math.abs(m.signalDelay) > win.duration + 1e-12;
   const clipped = Math.max(show1 ? m.A1 : 0, show2 ? m.A2 : 0) > vertical * 4 + 1e-12;
+  const weakChannel: 1 | 2 = m.A1 <= m.A2 ? 1 : 2;
+  const weakAmplitude = Math.min(m.A1, m.A2), strongAmplitude = Math.max(m.A1, m.A2);
+  const weakSignalHiddenByScale = m.isInterface && show1 && show2 && weakAmplitude < strongAmplitude * 0.01;
+  const sensitivities = SENSITIVITIES.includes(vertical) ? SENSITIVITIES : [...SENSITIVITIES, vertical].sort((a,b)=>a-b);
+  const inspectingSingleChannel = inspectedChannel === 1 ? show1 && !show2 : inspectedChannel === 2 ? show2 && !show1 : false;
+  function inspectWeakChannel() {
+    comparisonSensitivity.current = vertical;
+    setVertical(nextReadableSensitivity(weakAmplitude * 1.1 / 4));
+    setShow1(weakChannel === 1); setShow2(weakChannel === 2);
+    setInspectedChannel(weakChannel);
+  }
+  function restoreComparison() {
+    setShow1(true); setShow2(true); setVertical(comparisonSensitivity.current); setInspectedChannel(null);
+  }
+
 
   useEffect(() => {
     const element = holder.current;
@@ -119,15 +150,20 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
   function adjustBase() {
-    const required = (m.delay + m.period * 1.25) * 1000 / 10;
+    const required = (Math.abs(m.signalDelay) + m.period * 1.25) * 1000 / 10;
     setBase(BASES.find(candidate => candidate >= required - 1e-10) ?? BASES.at(-1)!);
   }
 
-  // A CH1 maximum at phase π/2 is paired with its delayed CH2 maximum.
-  const firstMaximum = Math.ceil((win.start + parameters.initialPhase / m.omega - m.period / 4) / m.period - 1e-10) * m.period + m.period / 4 - parameters.initialPhase / m.omega;
-  const secondMaximum = firstMaximum + m.delay;
+  // A maximum of the actual CH1 pressure includes the incident/reflected phase.
+  // The paired CH2 maximum is separated by the signal shift, not by the
+  // geometrical propagation time when an interface changes CH1's phase.
+  const firstMaximum = Math.ceil((win.start + m.phase1 / m.omega - m.period / 4) / m.period - 1e-10) * m.period + m.period / 4 - m.phase1 / m.omega;
+  const pairOffset = Math.max(0, Math.ceil((win.start - firstMaximum - m.signalDelay) / m.period - 1e-10));
+  const pairedMaximum = firstMaximum + pairOffset * m.period;
+  const secondMaximum = pairedMaximum + m.signalDelay;
   const periodVisible = firstMaximum + m.period <= win.start + win.duration + 1e-12;
-  const maximumPairVisible = secondMaximum <= win.start + win.duration + 1e-12;
+  const maximumPairVisible = pairedMaximum >= win.start - 1e-12 && pairedMaximum <= win.start + win.duration + 1e-12 && secondMaximum >= win.start - 1e-12 && secondMaximum <= win.start + win.duration + 1e-12;
+  const dimensionLabelX = clamp((X(pairedMaximum) + X(secondMaximum)) / 2, left + Math.min(95, plotWidth / 2), right - Math.min(95, plotWidth / 2));
   const scrubMax = win.duration * 1000;
   const relativeMs = win.relativeTime * 1000;
   const waveformCount = parameters.frequency * win.duration;
@@ -143,14 +179,14 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
   }
   function releaseScrub() {scrubStart.current=null;setHeldWindow(null);}
 
-  return <div className="dp-oscilloscope" data-testid="oscilloscope" data-sample-y1={value.y1} data-sample-y2={value.y2}>
+  return <div className="dp-oscilloscope" data-testid="oscilloscope" data-sample-y1={value.y1} data-sample-y2={value.y2} data-phase1={m.phase1} data-phase2={m.phase2} data-signal-delay={m.signalDelay} data-geometric-delay={m.delay} data-window-start={win.start}>
     <fieldset className="dp-scope-controls" disabled={disabled}>
       <SelectControl label="Base de temps" value={String(base)} options={BASES.map(item => ({ id: String(item), label: `${number(item)} ms/div` }))} onChange={v => setBase(Number(v))}/>
-      <SelectControl label="Sensibilité commune" value={String(vertical)} options={SENSITIVITIES.map(item => ({ id: String(item), label: `${number(item)} V/div` }))} onChange={v => setVertical(Number(v))}/>
+      <SelectControl label="Sensibilité commune" value={String(vertical)} options={sensitivities.map(item => ({ id: String(item), label: `${number(item)} V/div` }))} onChange={v => setVertical(Number(v))}/>
       <Toggle label="Acquisition stabilisée sur CH1" checked={stabilized} onChange={setStabilized}/>
     </fieldset>
     <div className="dp-scope-legend">
-      <fieldset disabled={disabled}><span className="dp-channel1"><Toggle label="CH1 / M1" checked={show1} onChange={setShow1}/></span><span className="dp-channel2"><Toggle label="CH2 / M2" checked={show2} onChange={setShow2}/></span></fieldset>
+      <fieldset disabled={disabled}><span className="dp-channel1"><Toggle label="CH1 / M1" checked={show1} onChange={checked=>{setShow1(checked);setInspectedChannel(null);}}/></span><span className="dp-channel2"><Toggle label="CH2 / M2" checked={show2} onChange={checked=>{setShow2(checked);setInspectedChannel(null);}}/></span></fieldset>
       <span>{stabilized ? 'Déclenchement : zéro montant de CH1' : 'Acquisition libre par fenêtres'}</span>
     </div>
     <div className="dp-scope-graph" ref={holder}>
@@ -175,7 +211,7 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
           {show2 && timeVisible && <circle cx={cursorX} cy={Y(value.y2)} r={5} className="dp-sample2"/>}
         </g>
         {show1 && periodVisible && <g className="dp-scope-dimension"><line x1={X(firstMaximum)} x2={X(firstMaximum + m.period)} y1={bottom+57} y2={bottom+57} markerStart={`url(#${arrowId})`} markerEnd={`url(#${arrowId})`}/><text x={X(firstMaximum+m.period/2)} y={bottom+73} textAnchor="middle">T = {number(m.period*1000)} ms</text></g>}
-        {show1 && show2 && maximumPairVisible && m.delay > 1e-12 && <g className="dp-scope-dimension"><line x1={X(firstMaximum)} x2={X(firstMaximum)} y1={top-3} y2={top+16} className="dp-scope-guide"/><line x1={X(secondMaximum)} x2={X(secondMaximum)} y1={top-3} y2={top+16} className="dp-scope-guide"/><line x1={X(firstMaximum)} x2={X(secondMaximum)} y1={top+5} y2={top+5} markerStart={`url(#${arrowId})`} markerEnd={`url(#${arrowId})`}/><text x={(X(firstMaximum)+X(secondMaximum))/2} y={top-30} textAnchor="middle">Δt total = {number(m.delay*1000)} ms</text></g>}
+        {show1 && show2 && maximumPairVisible && Math.abs(m.signalDelay) > 1e-12 && <g className="dp-scope-dimension" data-testid="scope-delay-dimension" data-time-m1={pairedMaximum} data-time-m2={secondMaximum}><line x1={X(pairedMaximum)} x2={X(pairedMaximum)} y1={top-3} y2={top+16} className="dp-scope-guide"/><line x1={X(secondMaximum)} x2={X(secondMaximum)} y1={top-3} y2={top+16} className="dp-scope-guide"/><line x1={X(pairedMaximum)} x2={X(secondMaximum)} y1={top+5} y2={top+5} markerStart={`url(#${arrowId})`} markerEnd={`url(#${arrowId})`}/><text x={dimensionLabelX} y={top-30} textAnchor="middle">{m.isInterface ? 'Décalage des maxima' : 'Δt total'} = {number(m.signalDelay*1000)} ms</text></g>}
         {[cursor1,cursor2].map((ratio, i) => {
           const x = left + ratio * plotWidth;
           return <g key={i}><line x1={x} x2={x} y1={top+25} y2={bottom} className="dp-measure-line"/><rect x={x-8} y={top+15} width={16} height={17} rx={4} className="dp-measure-label"/><text x={x} y={top+27} textAnchor="middle" className="dp-measure-number">{i+1}</text><rect x={x-17} y={top+10} width={34} height={plotHeight-7} className="dp-scope-drag" onPointerDown={e=>begin(e,i===0?'measure1':'measure2')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}/></g>;
@@ -192,12 +228,15 @@ export function Oscilloscope({ parameters, time, running, disabled = false, onTi
       <label>C1 <span className="lk-number-unit"><NumericInput label="Curseur de mesure 1 en pourcentage" value={cursor1*100} min={0} max={100} step={1} onChange={v=>setCursor1(v/100)} disabled={disabled}/><span>%</span></span></label>
       <label>C2 <span className="lk-number-unit"><NumericInput label="Curseur de mesure 2 en pourcentage" value={cursor2*100} min={0} max={100} step={1} onChange={v=>setCursor2(v/100)} disabled={disabled}/><span>%</span></span></label>
     </div>
-    {!maximumPairVisible && <div className="dp-scope-warning"><span>{delayOutside ? `Le retard total (${number(m.delay*1000)} ms) dépasse la fenêtre de ${number(win.duration*1000)} ms.` : 'La fenêtre ne contient pas les deux maxima correspondant au retard total.'}</span><Button onClick={adjustBase} disabled={disabled}>Ajuster la base de temps</Button></div>}
+    {!maximumPairVisible && <div className="dp-scope-warning"><span>{delayOutside ? `${m.isInterface ? 'Le décalage entre signaux' : 'Le retard total'} (${number(m.signalDelay*1000)} ms) dépasse la fenêtre de ${number(win.duration*1000)} ms.` : m.isInterface ? 'La fenêtre ne contient pas les deux maxima correspondant au décalage des signaux.' : 'La fenêtre ne contient pas les deux maxima correspondant au retard total.'}</span><Button onClick={adjustBase} disabled={disabled}>Ajuster la base de temps</Button></div>}
     {!timeVisible && <div className="dp-scope-warning"><span>L’instant commun est hors de cette courte fenêtre déclenchée sur CH1. Agrandissez la base de temps pour voir son curseur.</span><Button onClick={adjustBase} disabled={disabled}>Agrandir la fenêtre</Button></div>}
     {dense && <div className="dp-scope-warning"><span>Les cycles sont trop serrés pour une lecture fiable à cette largeur. Réduisez la fenêtre pour distinguer les oscillations.</span><Button onClick={reduceBase} disabled={disabled}>Réduire la base de temps</Button></div>}
+    {weakSignalHiddenByScale && <div className="dp-scope-warning dp-scope-weak-signal"><span>CH{weakChannel} est plus de 100 fois plus faible que CH{weakChannel===1?2:1}. Elle peut sembler plate à l’échelle de la voie forte. Pour l’examiner, masquez explicitement la voie forte et réglez une sensibilité commune plus fine.</span><Button onClick={inspectWeakChannel} disabled={disabled}>Examiner la voie faible</Button></div>}
+    {inspectingSingleChannel && <div className="dp-scope-weak-inspection" data-testid="weak-channel-inspection"><p>Inspection de CH{inspectedChannel} : CH{inspectedChannel===1?2:1} est masquée. La sensibilité <strong>commune</strong> est de {number(vertical)} V/div ; aucune voie n’est normalisée séparément.</p><Button onClick={restoreComparison} disabled={disabled}>Réafficher les deux voies</Button></div>}
     {clipped && <div className="dp-scope-warning">Une voie dépasse l’écran. Augmentez la sensibilité en V/div ; les amplitudes restent calculées sans normalisation.</div>}
     <p className="dp-scope-note">{stabilized ? 'Tracé stabilisé sur CH1 ; le point mobile indique l’instant partagé avec les cercles.' : 'Le tracé avance par fenêtres de temps, avec la même horloge que les cercles.'} En pause, glissez le triangle pour parcourir le temps. Les curseurs gris mesurent un intervalle libre.</p>
-    <p className="dp-scope-note">Deux sinusoïdes seules donnent le retard à un multiple entier de T près. Ici, le retard total est {parameters.mode==='microphones' ? 'calculé à partir de Δx/c' : 'un décalage mathématique calculé à partir de δ/ω, sans distance imposée'}. Les repères Δt relient des maxima correspondants du modèle, pas deux maxima choisis arbitrairement.</p>
+    {m.isInterface && <div className="dp-scope-interface-readout" data-testid="scope-interface-delays"><span>Temps de parcours calculé : <strong>{number(m.delay*1000,4)} ms</strong></span><span>Décalage des signaux : <strong>{number(m.signalDelay*1000,4)} ms</strong></span><p>La réflexion modifie la phase de CH1. Le déphasage entre capteurs n’est donc pas toujours égal à −ω fois le temps de parcours.</p></div>}
+    <p className="dp-scope-note">Deux sinusoïdes seules donnent le retard à un multiple entier de T près. {m.isInterface ? 'Les repères relient des maxima correspondants des signaux totaux, après prise en compte de la réflexion et de la transmission ; ils mesurent leur décalage, distinct du temps de parcours géométrique.' : <>Ici, le retard total est {parameters.mode==='microphones' ? 'calculé à partir de Δx/c' : 'un décalage mathématique calculé à partir de δ/ω, sans distance imposée'}. Les repères Δt relient des maxima correspondants du modèle, pas deux maxima choisis arbitrairement.</>}</p>
     <div className="dp-scope-sampling">{number(waveformCount,2)} périodes affichées · tensions instantanées : <span className="dp-channel1">{number(value.y1,3)} V</span> / <span className="dp-channel2">{number(value.y2,3)} V</span></div>
   </div>;
 }

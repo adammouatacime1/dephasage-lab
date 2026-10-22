@@ -22,11 +22,13 @@ async function dragMicrophone(page: Page, centimeters: number, water = false) {
   const target = await microphone.evaluate((element, position) => {
     const svg = (element as SVGElement).ownerSVGElement!;
     const left = Number(svg.dataset.rulerLeft), right = Number(svg.dataset.rulerRight);
-    const y = svg.viewBox.baseVal.width === 600 ? 219 : 172;
-    const point = new DOMPoint(left + position / 200 * (right - left), y).matrixTransform(svg.getScreenCTM()!);
-    return { x: point.x, y: point.y };
+    const origin = new DOMPoint(0, 0).matrixTransform((element as SVGGraphicsElement).getScreenCTM()!);
+    const point = new DOMPoint(left + position / 200 * (right - left), 0).matrixTransform(svg.getScreenCTM()!);
+    return { x: point.x, y: origin.y, startX: origin.x, startY: origin.y };
   }, centimeters);
-  await microphone.hover();
+  // Viser le corps du capteur, pas le centre de son groupe SVG : une
+  // étiquette de tension très longue peut élargir la boîte englobante.
+  await page.mouse.move(target.startX, target.startY);
   await page.mouse.down();
   await page.mouse.move(target.x, target.y, { steps: 8 });
   await page.mouse.up();
@@ -514,4 +516,257 @@ test('le profil spatial montre le bon rapport d’amplitude, suit M2 et devient 
   expect(new Set(yCoordinates).size).toBe(1);
   await page.getByRole('combobox', { name: 'Modèle', exact: true }).selectOption('free');
   await expect(envelope).toHaveCount(0);
+});
+
+test('interface Air → Eau : un microphone et un hydrophone, deux longueurs d’onde et un parcours composé', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Milieu de propagation', exact: true })).toHaveValue('air-water');
+  await expect(input(page, 'Position de l’interface')).toHaveValue('40');
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+  const sensors = page.locator('.dp-apparatus svg:visible .dp-microphone');
+  await expect(sensors.first()).toHaveAttribute('data-medium', 'air');
+  await expect(sensors.last()).toHaveAttribute('data-medium', 'water');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true })).toBeVisible();
+  expect(await displayedNumber(page, 'Longueur d’onde · Air')).toBe(34);
+  expect(await displayedNumber(page, 'Longueur d’onde · Eau douce')).toBe(148);
+  const travel = .4 / 340 + .2 / 1480;
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo(travel * 1000, 4);
+  expect(await displayedNumber(page, 'Phase du parcours')).toBeCloseTo(2 * Math.PI * 1000 * travel, 3);
+  expect(await displayedNumber(page, 'Intensité réfléchie')).toBeCloseTo(99.8895697635, 3);
+  expect(await displayedNumber(page, 'Intensité transmise')).toBeCloseTo(.1104302365, 3);
+  await expect(page.locator('.dp-interface-flow')).toContainText('Onde réfléchie');
+  await expect(page.locator('.dp-interface-facts')).toContainText('Air : 40 cm · Eau douce : 20 cm');
+});
+
+test('interface Eau → Air : inversion des types de capteurs et du coefficient de réflexion de pression', async ({ page }) => {
+  await page.getByRole('combobox', { name: 'Milieu de propagation', exact: true }).selectOption('water-air');
+  await expect(input(page, 'Célérité · Eau douce')).toHaveValue('1480');
+  await expect(input(page, 'Célérité · Air')).toHaveValue('340');
+  const sensors = page.locator('.dp-apparatus svg:visible .dp-microphone');
+  await expect(sensors.first()).toHaveAttribute('data-medium', 'water');
+  await expect(sensors.last()).toHaveAttribute('data-medium', 'air');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale du microphone M2', exact: true })).toBeVisible();
+  await expect(page.locator('.dp-apparatus svg:visible').getByText('Émetteur immergé', { exact: true })).toBeVisible();
+  const Zwater = 998 * 1480, Zair = 1.2 * 340;
+  expect(await displayedNumber(page, 'Réflexion de pression')).toBeCloseTo((Zair - Zwater) / (Zair + Zwater), 6);
+  expect(await displayedNumber(page, 'Transmission de pression')).toBeCloseTo(2 * Zair / (Zwater + Zair), 6);
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo((.4 / 1480 + .2 / 340) * 1000, 4);
+  expect(await displayedNumber(page, 'Intensité réfléchie') + await displayedNumber(page, 'Intensité transmise')).toBeCloseTo(100, 3);
+});
+
+test('interface : le capteur M2 change de type lors d’un passage au clavier puis par glissement', async ({ page }) => {
+  for (const [configuration, startsInWater, firstSpeed, secondSpeed] of [['air-water', true, 340, 1480], ['water-air', false, 1480, 340]] as const) {
+    await page.getByRole('combobox', { name: 'Milieu de propagation', exact: true }).selectOption(configuration);
+    await setNumber(page, 'Position de M2', '60');
+    const initialName = startsInWater ? 'Position longitudinale de l’hydrophone M2' : 'Position longitudinale du microphone M2';
+    await page.getByRole('slider', { name: initialName, exact: true }).focus();
+    await page.keyboard.press('Home');
+    await expect(input(page, 'Position de M2')).toHaveValue('0');
+    await setNumber(page, 'Position de M2', '20');
+    const firstSideName = startsInWater ? 'Position longitudinale du microphone M2' : 'Position longitudinale de l’hydrophone M2';
+    await expect(page.getByRole('slider', { name: firstSideName, exact: true })).toBeVisible();
+    expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo(.2 / firstSpeed * 1000, 4);
+    await dragMicrophone(page, 80, !startsInWater);
+    expect(Number(await input(page, 'Position de M2').inputValue())).toBeCloseTo(80, 1);
+    await expect(page.getByRole('slider', { name: initialName, exact: true })).toBeVisible();
+    expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo((.4 / firstSpeed + .4 / secondSpeed) * 1000, 4);
+  }
+});
+
+test('interface : déplacer la frontière conserve M2 et recalcule son milieu et les deux trajets', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await setNumber(page, 'Déplacer l’interface', '80');
+  await expect(input(page, 'Position de l’interface')).toHaveValue('80');
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale du microphone M2', exact: true })).toBeVisible();
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo(.6 / 340 * 1000, 4);
+  await setNumber(page, 'Position de l’interface', '20');
+  await expect(input(page, 'Déplacer l’interface')).toHaveValue('20');
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true })).toBeVisible();
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo((.2 / 340 + .4 / 1480) * 1000, 4);
+});
+
+test('interface sans absorption : réflexion, interférences et bilan énergétique restent présents', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  const coefficientBefore = await metricValue(page, 'Réflexion de pression').textContent();
+  await page.getByRole('checkbox', { name: 'Absorption sur les trajets', exact: true }).uncheck();
+  const r = (998 * 1480 - 1.2 * 340) / (998 * 1480 + 1.2 * 340);
+  const phaseRoundTrip = 2 * 2 * Math.PI * 1000 * .4 / 340;
+  const A1 = Math.hypot(1 + r * Math.cos(phaseRoundTrip), -r * Math.sin(phaseRoundTrip));
+  const A2 = 1 + r;
+  expect(await displayedNumber(page, 'Amplitude incidente à M1')).toBe(1);
+  expect(await displayedNumber(page, 'Amplitude totale à M1')).toBeCloseTo(A1, 6);
+  expect(await displayedNumber(page, 'Amplitude totale à M2')).toBeCloseTo(A2, 6);
+  expect(await displayedNumber(page, 'Rapport de pression A₂/A₁')).toBeCloseTo(100 * A2 / A1, 2);
+  expect(A2 / A1).toBeGreaterThan(1);
+  await expect(metricValue(page, 'Réflexion de pression')).toHaveText(coefficientBefore!);
+  expect(await displayedNumber(page, 'Intensité réfléchie') + await displayedNumber(page, 'Intensité transmise')).toBeCloseTo(100, 3);
+  expect(await displayedNumber(page, 'Intensité transmise')).toBeLessThan(1);
+  await expect(metric(page, 'Rapport de pression A₂/A₁')).toContainText('ce n’est pas un rapport d’énergie');
+  await expect(metric(page, 'Perte d’amplitude')).toHaveCount(0);
+  const envelope = page.getByTestId('amplitude-envelope');
+  expect(Number(await envelope.getAttribute('data-ratio'))).toBeCloseTo(A2 / A1, 10);
+  const coordinates = (await envelope.locator('.dp-envelope-path').getAttribute('d'))!;
+  const yCoordinates = [...coordinates.matchAll(/[ML][\d.]+,([\d.]+)/g)].map(match => Number(match[1]));
+  expect(new Set(yCoordinates).size).toBeGreaterThan(5);
+});
+
+test('interface : oscilloscope et cercles utilisent la phase totale de M1 et les vrais maxima correspondants', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Base de temps', exact: true }).selectOption('1');
+  const omega = 2 * Math.PI * 1000, r = (998 * 1480 - 408) / (998 * 1480 + 408);
+  const reflected = r * Math.exp(-2 * .2 * .4), roundTrip = 2 * omega * .4 / 340;
+  const phi1 = Math.atan2(-reflected * Math.sin(roundTrip), 1 + reflected * Math.cos(roundTrip));
+  const A1 = Math.hypot(1 + reflected * Math.cos(roundTrip), -reflected * Math.sin(roundTrip));
+  const travel = .4 / 340 + .2 / 1480, phi2 = -omega * travel;
+  const A2 = (1 + r) * Math.exp(-.2 * .4 - .05 * .2);
+  const signalDelay = (phi1 - phi2) / omega;
+  const scope = page.getByTestId('oscilloscope');
+  expect(Number(await scope.getAttribute('data-phase1'))).toBeCloseTo(phi1, 10);
+  expect(Math.abs(phi1)).toBeGreaterThan(.1);
+  expect(Number(await scope.getAttribute('data-phase2'))).toBeCloseTo(phi2, 10);
+  const start = Number(await scope.getAttribute('data-window-start'));
+  expect(Math.sin(omega * start + phi1)).toBeCloseTo(0, 10);
+  expect(Math.cos(omega * start + phi1)).toBeGreaterThan(.99);
+  const background = scope.locator('.dp-scope-background');
+  const middle = Number(await background.getAttribute('y')) + Number(await background.getAttribute('height')) / 2;
+  const firstOrdinate = Number((await page.getByTestId('trace-ch1').getAttribute('d'))!.match(/^M[\d.]+,([\d.-]+)/)![1]);
+  expect(firstOrdinate).toBeCloseTo(middle, 1);
+  await page.getByRole('button', { name: 'Avancer d’un pas' }).click();
+  const t = .001 / 24, y1 = A1 * Math.sin(omega * t + phi1), y2 = A2 * Math.sin(omega * t + phi2);
+  expect(Number(await scope.getAttribute('data-sample-y1'))).toBeCloseTo(y1, 10);
+  expect(Number(await scope.getAttribute('data-sample-y2'))).toBeCloseTo(y2, 10);
+  const projection = Math.sin(omega * t + phi1).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+  await expect(page.locator('.dp-phase-circles')).toContainText(`sin θ1 = ${projection}`);
+  await expect(page.getByTestId('instant-y1')).toHaveText(`y₁ = ${y1.toLocaleString('fr-FR', { maximumFractionDigits: 6 })} V`);
+  expect(Number(await scope.getAttribute('data-geometric-delay'))).toBeCloseTo(travel, 12);
+  expect(Number(await scope.getAttribute('data-signal-delay'))).toBeCloseTo(signalDelay, 12);
+  expect(Math.abs(travel - signalDelay)).toBeGreaterThan(.0001);
+  const dimension = page.getByTestId('scope-delay-dimension');
+  await expect(dimension).toBeVisible();
+  const t1 = Number(await dimension.getAttribute('data-time-m1')), t2 = Number(await dimension.getAttribute('data-time-m2'));
+  expect(Math.sin(omega * t1 + phi1)).toBeCloseTo(1, 10);
+  expect(Math.sin(omega * t2 + phi2)).toBeCloseTo(1, 10);
+  expect(t2 - t1).toBeCloseTo(signalDelay, 12);
+  await expect(page.getByTestId('scope-interface-delays')).toContainText('Temps de parcours calculé');
+  await expect(page.getByTestId('scope-interface-delays')).toContainText('Décalage des signaux');
+});
+
+test('interface : changer fréquence et célérités conserve les positions et remet l’horloge à zéro', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await page.getByRole('button', { name: 'Avancer d’un pas' }).click();
+  await setNumber(page, 'Fréquence du GBF', '2000');
+  await expect(page.getByTestId('physical-time')).toHaveText('t = 0 ms');
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+  await expect(input(page, 'Position de l’interface')).toHaveValue('40');
+  expect(await displayedNumber(page, 'Longueur d’onde · Air')).toBe(17);
+  expect(await displayedNumber(page, 'Longueur d’onde · Eau douce')).toBe(74);
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo((.4 / 340 + .2 / 1480) * 1000, 4);
+  await setNumber(page, 'Célérité · Air', '400');
+  await setNumber(page, 'Célérité · Eau douce', '1600');
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+  await expect(input(page, 'Position de l’interface')).toHaveValue('40');
+  expect(await displayedNumber(page, 'Longueur d’onde · Air')).toBe(20);
+  expect(await displayedNumber(page, 'Longueur d’onde · Eau douce')).toBe(80);
+  expect(await displayedNumber(page, 'Temps de parcours')).toBeCloseTo((.4 / 400 + .2 / 1600) * 1000, 4);
+});
+
+test('interface : la pression totale reste continue lorsque M2 franchit la frontière', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await setNumber(page, 'Position de M2', '39,999');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale du microphone M2', exact: true })).toBeVisible();
+  const beforeAmplitude = await displayedNumber(page, 'Amplitude totale à M2');
+  const beforePressure = Number(await page.getByTestId('oscilloscope').getAttribute('data-sample-y2'));
+  await setNumber(page, 'Position de M2', '40,001');
+  await expect(page.getByRole('slider', { name: 'Position longitudinale de l’hydrophone M2', exact: true })).toBeVisible();
+  const afterAmplitude = await displayedNumber(page, 'Amplitude totale à M2');
+  const afterPressure = Number(await page.getByTestId('oscilloscope').getAttribute('data-sample-y2'));
+  expect(Math.abs(afterAmplitude - beforeAmplitude)).toBeLessThan(.0001);
+  expect(Math.abs(afterPressure - beforePressure)).toBeLessThan(.0001);
+});
+
+test('interface conservée en phase libre : deux amplitudes idéales et aucun calcul de réflexion appliqué aux signaux', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Air → Eau', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Modèle', exact: true }).selectOption('free');
+  await setNumber(page, 'Retard de phase libre', '450');
+  await expect(metricValue(page, 'Retard de phase total')).toContainText('5π/2');
+  expect(await displayedNumber(page, 'Amplitude de référence')).toBe(1);
+  expect(await displayedNumber(page, 'Amplitude reçue')).toBe(1);
+  expect(await displayedNumber(page, 'Décalage temporel mathématique')).toBe(1.25);
+  await expect(page.getByRole('heading', { name: 'Réflexion et transmission à l’interface', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('amplitude-envelope')).toHaveCount(0);
+  await expect(page.locator('.dp-apparatus')).toHaveAttribute('data-configuration', 'air-water');
+  await expect(input(page, 'Position de l’interface')).toHaveValue('40');
+  await expect(input(page, 'Déplacer M2')).toHaveValue('60');
+  expect(Number(await page.getByTestId('oscilloscope').getAttribute('data-sample-y2'))).toBeCloseTo(-1, 10);
+  await page.getByRole('combobox', { name: 'Modèle', exact: true }).selectOption('microphones');
+  await expect(page.getByRole('heading', { name: 'Réflexion et transmission à l’interface', exact: true })).toBeVisible();
+  await expect(input(page, 'Position de M2')).toHaveValue('60');
+});
+
+for (const width of [320, 390, 768]) test(`interface mobile ${width}px : quatre choix de milieu, deux sens et thèmes sans débordement`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  const choices = mediumButtons(page).getByRole('button');
+  await expect(choices).toHaveCount(4);
+  for (const direction of ['Air → Eau', 'Eau → Air']) {
+    await mediumButtons(page).getByRole('button', { name: direction, exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Les capteurs et l’interface air–eau', exact: true })).toBeVisible();
+    for (const choice of await choices.all()) await expect(choice).toBeVisible();
+    const toolbar = await mediumButtons(page).boundingBox();
+    expect(toolbar!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const positionBefore = await input(page, 'Position de M2').inputValue();
+    await setNumber(page, 'Déplacer l’interface', '45');
+    await expect(input(page, 'Position de l’interface')).toHaveValue('45');
+    await expect(input(page, 'Position de M2')).toHaveValue(positionBefore);
+  }
+  await page.getByRole('button', { name: 'Activer le thème sombre' }).click();
+  await expect(page.locator('.dephasage-lab')).toHaveAttribute('data-lab-theme', 'dark');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Activer le thème clair' }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('interface Eau → Air : examiner la voie faible agrandit sa trace réelle sans normaliser sa tension', async ({ page }) => {
+  await mediumButtons(page).getByRole('button', { name: 'Eau → Air', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'CH1 / M1', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'CH2 / M2', exact: true })).toBeChecked();
+  const scope = page.getByTestId('oscilloscope'), trace = page.getByTestId('trace-ch2');
+  const beforeTrace = (await trace.getAttribute('d'))!;
+  const beforeSample = await scope.getAttribute('data-sample-y2');
+  const beforeAmplitude = await metricValue(page, 'Amplitude totale à M2').textContent();
+  const transmitted = 2 * 408 / (998 * 1480 + 408);
+  const amplitude = transmitted * Math.exp(-.05 * .4 - .2 * .2);
+  const travel = .4 / 1480 + .2 / 340;
+  expect(Number(beforeSample)).toBeCloseTo(amplitude * Math.sin(-2 * Math.PI * 1000 * travel), 12);
+  const sensitivity = page.getByRole('combobox', { name: 'Sensibilité commune', exact: true });
+  await expect(sensitivity).toHaveValue('0.5');
+  await page.getByRole('button', { name: 'Examiner la voie faible', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'CH1 / M1', exact: true })).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'CH2 / M2', exact: true })).toBeChecked();
+  await expect(page.getByTestId('trace-ch1')).toHaveCount(0);
+  await expect(trace).toBeVisible();
+  await expect(sensitivity).toHaveValue('0.0002');
+  await expect(scope).toHaveAttribute('data-sample-y2', beforeSample!);
+  await expect(metricValue(page, 'Amplitude totale à M2')).toHaveText(beforeAmplitude!);
+  await expect(page.getByTestId('weak-channel-inspection')).toContainText('CH1 est masquée');
+  await expect(page.getByTestId('weak-channel-inspection')).toContainText('aucune voie n’est normalisée séparément');
+  const afterTrace = (await trace.getAttribute('d'))!;
+  expect(afterTrace).not.toBe(beforeTrace);
+  const ys = [...afterTrace.matchAll(/[ML][\d.]+,([\d.-]+)/g)].map(match => Number(match[1]));
+  const extent = Math.max(...ys) - Math.min(...ys);
+  const plotHeight = Number(await scope.locator('.dp-scope-background').getAttribute('height'));
+  // La hauteur est celle de la tension réelle divisée par la seule gamme V/div,
+  // et non celle d’une voie ramenée artificiellement à une amplitude de 1 V.
+  expect(extent).toBeCloseTo(2 * amplitude / .0002 * plotHeight / 8, 1);
+  expect(extent).toBeGreaterThan(100);
+  expect(extent).toBeLessThan(plotHeight);
+  await page.getByRole('button', { name: 'Réafficher les deux voies', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'CH1 / M1', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'CH2 / M2', exact: true })).toBeChecked();
+  await expect(sensitivity).toHaveValue('0.5');
+  await expect(page.getByTestId('trace-ch1')).toBeVisible();
+  await expect(trace).toHaveAttribute('d', beforeTrace);
+  await expect(scope).toHaveAttribute('data-sample-y2', beforeSample!);
 });

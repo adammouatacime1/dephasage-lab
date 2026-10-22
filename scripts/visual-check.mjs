@@ -6,9 +6,10 @@ const page=await browser.newPage({reducedMotion:'reduce'});
 page.on('pageerror',e=>{console.error(e);process.exitCode=1;});
 for(const [name,width,height] of [['desktop',1440,1100],['mobile',390,844]]) {
  await page.setViewportSize({width,height});
- for(const medium of ['air','water']) {
+ for(const medium of ['air','water','air-water','water-air']) {
   await page.goto(process.env.REVIEW_URL||'http://127.0.0.1:5173/');
-  if(medium==='water')await page.getByRole('group',{name:'Milieu de l’expérience',exact:true}).getByRole('button',{name:'Eau douce',exact:true}).click();
+  const label=medium==='water'?'Eau douce':medium==='air-water'?'Air → Eau':'Eau → Air';
+  if(medium!=='air')await page.getByRole('group',{name:'Milieu de l’expérience',exact:true}).getByRole('button',{name:label,exact:true}).click();
   for(const theme of ['light','dark']) {
    if(theme==='dark')await page.getByRole('button',{name:'Activer le thème sombre'}).click();
    await page.screenshot({path:`${dir}/${name}-${medium}-${theme}.png`,fullPage:true});
